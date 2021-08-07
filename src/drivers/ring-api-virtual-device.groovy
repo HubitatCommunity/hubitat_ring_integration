@@ -909,6 +909,7 @@ def isHub(kind) {
   "security-panic": [name: "Ring Virtual Panic Button", hidden: false],
   "base_station_v1": [name: "Ring Virtual Alarm Hub", hidden: false],
   "siren": [name: "Ring Virtual Siren", hidden: false],
+  "siren.outdoor-strobe": [name: "Ring Virtual Siren", hidden: false],
   "switch": [name: "Ring Virtual Switch", hidden: false],
   "bridge.flatline": [name: "Ring Virtual Retrofit Alarm Kit", hidden: false],
   //virtual alarm devices
