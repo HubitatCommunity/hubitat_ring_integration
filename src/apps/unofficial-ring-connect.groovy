@@ -48,6 +48,7 @@
  *              Updated user agent on some API calls. This may cause a new device to show logged in under Ring Control Center
  *  2020-07-22: Added support for second device ID of wired Spotlight Cam
  *  2021-06-30: Added support for Ring Floodlight Cam Wired Plus
+ *  2021-07-30: Fixed Locations API
  *
  *
  */
@@ -147,7 +148,7 @@ def locations() {
 
   dynamicPage(name: "locations", title: "Select which location you want to use", nextPage: "mainPage", uninstall: true) {
     section("Locations") {
-      input "selectedLocations", "enum", required: true, title: "Select a locations  (${numFound} found)", multiple: false, options: options
+      input "selectedLocations", "enum", required: true, title: "Select a location  (${numFound} found)", multiple: false, options: options
     }
   }
 }
@@ -1115,8 +1116,8 @@ private getRequests(parts) {
       synchronous: true,
       type: "bearer",
       params: [
-        uri: "https://app.ring.com",
-        path: "/rhq/v1/devices/v1/locations",
+        uri: "https://api.ring.com",
+        path: "/devices/v1/locations",
         contentType: JSON/*"${JSON}, ${TEXT}, ${ALL}"*/
       ]
     ],

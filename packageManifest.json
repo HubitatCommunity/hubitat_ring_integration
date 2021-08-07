@@ -1,7 +1,7 @@
 {
   "packageName": "Hubitat Ring Integration (Unofficial)",
   "author": "codahq",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "minimumHEVersion": "0.0",
   "dateReleased": "2020-12-01",
   "releaseNotes": "Fix bug with data fields in hubitat v2.2.4",
@@ -13,7 +13,7 @@
       "location": "https://raw.githubusercontent.com/HubitatCommunity/hubitat_ring_integration/master/src/apps/unofficial-ring-connect.groovy",
       "required": true,
       "oauth": true,
-      "version": "0.3.4"
+      "version": "0.3.5"
     }
   ],
   "drivers": [
