@@ -61,7 +61,7 @@ metadata {
   }
 }
 
-@Field static def LAST_ACTIVITY_THRESHOLD = 60 //minutes
+@Field final static Integer LAST_ACTIVITY_THRESHOLD = 60 //minutes
 
 def canPollLight() {
   return pollLight
@@ -139,7 +139,6 @@ def off() {
   parent.simpleRequest("device-set", [dni: device.deviceNetworkId, kind: "doorbots", action: "floodlight_light_off"])
 }
 
-
 def flash() {
   logInfo "${device.getDisplayName()} was set to flash with a rate of ${strobeRate} milliseconds for ${strobeTimeout.toInteger()} seconds"
   state.strobing = true
@@ -159,24 +158,20 @@ def strobeOff() {
   parent.simpleRequest("device-set", [dni: device.deviceNetworkId, kind: "doorbots", action: "floodlight_light_off"])
 }
 
-def childParse(type, params) {
-  logDebug "childParse(type, msg)"
-  logTrace "type ${type}"
+void childParse(final String type, final Map params) {
+  logDebug "childParse(${type}, params)"
   logTrace "params ${params}"
 
   if (canReportLastActivity()) {
-    sendEvent(name: "lastActivity", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
+    sendEvent(name: "lastActivity", value: convertToLocalTimeString(new Date()))
   }
   if (type == "refresh") {
-    logTrace "refresh"
     handleRefresh(params.msg)
   }
   else if (type == "device-set") {
-    logTrace "set"
     handleSet(type, params)
   }
   else if (type == "dings") {
-    logTrace "dings"
     handleDings(params.type, params.msg)
   }
   else {
@@ -184,93 +179,93 @@ def childParse(type, params) {
   }
 }
 
-def canReportLastActivity() {
-  def now = new Date().getTime()
-  if (state.lastActivity == null || now > (state.lastActivity + (LAST_ACTIVITY_THRESHOLD * 60 * 1000))) {
-    state.lastActivity = now
+boolean canReportLastActivity() {
+  if (state.lastActivity == null || now() > (state.lastActivity + (LAST_ACTIVITY_THRESHOLD * 60 * 1000))) {
+    state.lastActivity = now()
     return true
   }
   return false
 }
 
-private handleRefresh(json) {
-  logTrace "handleRefresh(${json.description})"
+private void handleRefresh(final Map msg) {
+  logDebug "handleRefresh(${msg})"
 
-  if (json.battery_life != null && !discardBatteryLevel) {
-    checkChanged("battery", json.battery_life, "%")
-    if (json.battery_life_2 != null) {
-      checkChanged("battery2", json.battery_life_2, "%")
+  if (msg.battery_life != null && !discardBatteryLevel) {
+    checkChanged("battery", msg.battery_life, "%")
+    if (msg.battery_life_2 != null) {
+      checkChanged("battery2", msg.battery_life_2, "%")
     }
   }
 
-  if (!json.led_status) {
+  if (!msg.led_status) {
     log.warn "No status?"
     return
   }
 
-  if (json.led_status && !(json.led_status instanceof java.lang.String) && json.led_status.seconds_remaining != null) {
-    checkChanged("switch", json.led_status.seconds_remaining > 0 ? "on" : "off")
+  if (!(msg.led_status instanceof java.lang.String) && msg.led_status.seconds_remaining != null) {
+    checkChanged("switch", msg.led_status.seconds_remaining > 0 ? "on" : "off")
   }
-  else if (json.led_status) {
-    checkChanged("switch", json.led_status)
+  else {
+    checkChanged("switch", msg.led_status)
   }
-  if (json.firmware_version && device.getDataValue("firmware") != json.firmware_version) {
-    device.updateDataValue("firmware", json.firmware_version)
+  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
+    device.updateDataValue("firmware", msg.firmware_version)
   }
 }
 
-private handleSet(id, params) {
-  logTrace "handleSet(${id}, ${params})"
+private void handleSet(final Map params) {
+  logTrace "handleSet(${params})"
   if (params.response != 200) {
     log.warn "Not successful?"
     return
   }
   if (params.action == "floodlight_light_on") {
-    logInfo "Device ${device.label} switch is on"
-    sendEvent(name: "switch", value: "on")
+    checkChanged("switch", "on")
   }
   else if (params.action == "floodlight_light_off") {
-    logInfo "Device ${device.label} switch is off"
-    sendEvent(name: "switch", value: "off")
+    checkChanged("switch", "off")
   }
   else {
     log.error "Unsupported set ${params.action}"
   }
 }
 
-private handleDings(type, json) {
-  logTrace "json: ${json}"
-  if (json == null) {
+private void handleDings(final String type, final Map msg) {
+  logTrace "msg: ${msg}"
+  if (msg == null) {
+    log.warn "Got a null msg!"
     checkChanged("motion", "inactive")
   }
-  else if (json.kind == "motion" && json.motion == true) {
+  else if (msg.kind == "motion" && msg.motion == true) {
     checkChanged("motion", "active")
-    unschedule(motionOff)
-  }
-  if (type == "IFTTT") {
-    def motionTimeout = 60
-    runIn(motionTimeout, motionOff)
+
+    if (type == "IFTTT") {
+      runIn(60, motionOff)
+    } else {
+      unschedule(motionOff)
+    }
   }
 }
 
-def motionOff(data) {
-  logDebug "motionOff($data)"
-  childParse("dings", [msg: null])
+void motionOff() {
+  checkChanged("motion", "inactive")
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }
 
-private convertToLocalTimeString(dt) {
-  def timeZoneId = location?.timeZone?.ID
-  if (timeZoneId) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", TimeZone.getTimeZone(timeZoneId))
+private String convertToLocalTimeString(final Date dt) {
+  TimeZone timeZone = location?.timeZone
+  if (timeZone) {
+    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
   }
   else {
-    return "$dt"
+    return dt.toString()
   }
 }

@@ -91,34 +91,35 @@ def playDing() {
 
 def mute() {
   logDebug "Attempting to mute."
-  if (!isMuted()) {
+
+  if (checkChanged("mute", "muted")) {
     state.prevVolume = device.currentValue("volume")
     setVolume(0)
   }
   else {
     logInfo "Already muted."
-    sendEvent(name: "mute", value: "muted")
   }
 }
 
 def unmute() {
   logDebug "Attempting to unmute."
-  if (isMuted()) {
+
+  if (checkChanged("mute", "unmuted")) {
     setVolume(state.prevVolume)
   }
   else {
     logInfo "Already unmuted."
-    sendEvent(name: "mute", value: "unmuted")
   }
 }
 
 def setVolume(volumelevel) {
   logDebug "Attempting to set volume."
+
   if (device.currentValue("volume") != volumelevel) {
     parent.simpleRequest("device-set", [
       dni: device.deviceNetworkId,
       kind: "chimes",
-      params: ["chime[settings][volume]": (volumelevel / 10 as Integer)]
+      params: ["chime[settings][volume]": (volumelevel / 10).toInteger()]
     ])
   }
   else {
@@ -129,7 +130,7 @@ def setVolume(volumelevel) {
 
 def volumeUp() {
   logDebug "Attempting to raise volume."
-  def currVol = device.currentValue("volume") / 10 as Integer
+  final Integer currVol = device.currentValue("volume").toInteger() / 10
   if (currVol < 10) {
     setVolume((currVol + 1) * 10)
   }
@@ -141,7 +142,7 @@ def volumeUp() {
 
 def volumeDown() {
   logDebug "Attempting to lower volume."
-  def currVol = device.currentValue("volume") / 10 as Integer
+  final Integer currVol = device.currentValue("volume").toInteger() / 10
   if (currVol > 0) {
     setVolume((currVol - 1) * 10)
   }
@@ -176,32 +177,28 @@ def playTrackAndResume(trackuri, volumelevel) {
   log.error "Not implemented! playTrackAndResume(trackuri, volumelevel)"
 }
 
-def childParse(type, params = []) {
-  logDebug "childParse(type, params)"
-  logTrace "type ${type}"
+void childParse(final String type, final Map params) {
+  logDebug "childParse(${type}, params)"
   logTrace "params ${params}"
 
   state.lastUpdate = now()
 
   if (type == "refresh") {
-    logTrace "refresh"
     handleRefresh(params.msg)
   }
   else if (type == "device-control") {
-    logTrace "device-control"
-    handleBeep(type, params)
+    handleBeep(params)
   }
   else if (type == "device-set") {
-    logTrace "volume"
-    handleVolume(type, params)
+    handleVolume(params)
   }
   else {
     log.error "Unhandled type ${type}"
   }
 }
 
-private handleBeep(id, params) {
-  logTrace "handleBeep(${id}, ${params.response})"
+private void handleBeep(final Map params) {
+  logTrace "handleBeep(${params})"
   if (params.response != 204) {
     log.warn "Not successful?"
     return
@@ -211,55 +208,53 @@ private handleBeep(id, params) {
   }
 }
 
-private handleVolume(id, params) {
-  logTrace "handleVolume(${id}, ${params})"
+private void handleVolume(final Map params) {
+  logTrace "handleVolume(${params})"
   if (params.response != 204) {
     log.warn "Not successful?"
     return
   }
 
-  sendEvent(name: "volume", value: (params.volume as Integer) * 10)
-  logInfo "Device ${device.label} volume set to ${(params.volume as Integer) * 10}"
-
-  if (params.volume == 0 && device.currentValue("mute") != "muted") {
-    sendEvent(name: "mute", value: "muted")
-    logInfo "Device ${device.label} set to muted"
-  }
-  if (params.volume != 0 && device.currentValue("mute") == "muted") {
-    sendEvent(name: "mute", value: "unmuted")
-    logInfo "Device ${device.label} set to unmuted"
-  }
+  final Integer volume = params.volume.toInteger() * 10
+  checkChanged('volume', volume)
+  checkChanged("mute", volume == 0 ? "muted" : "unmuted")
 }
 
-private handleRefresh(json) {
-  logDebug "handleRefresh(json)"
-  logTrace "json ${json}"
-  if (!json.settings) {
+private void handleRefresh(final Map msg) {
+  logDebug "handleRefresh(${msg})"
+
+  if (!msg.settings) {
     log.warn "No volume?"
     return
   }
-  if (device.currentValue("volume") != (json.settings.volume as Integer) * 10) {
-    sendEvent(name: "volume", value: (json.settings.volume as Integer) * 10)
-    logInfo "Device ${device.label} volume set to ${(json.settings.volume as Integer) * 10}"
-  }
-  if (device.currentValue("mute") == null) {
-    sendEvent(name: "mute", value: "unmuted")
-    logInfo "Device ${device.label} set to unmuted"
-  }
+
+  final Integer volume = msg.settings.volume.toInteger() * 10
+  checkChanged("volume", volume)
+  checkChanged("mute", volume == 0 ? "muted" : "unmuted")
+
   if (state.prevVolume == null) {
     state.prevVolume = 50
     logInfo "No previous volume found so arbitrary value given"
   }
 
-  if (json.firmware_version && device.getDataValue("firmware") != json.firmware_version) {
-    device.updateDataValue("firmware", json.firmware_version)
+  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
+    device.updateDataValue("firmware", msg.firmware_version)
   }
-  if (json.kind && device.getDataValue("kind") != json.kind) {
-    device.updateDataValue("kind", json.kind)
+  if (msg.kind && device.getDataValue("kind") != msg.kind) {
+    device.updateDataValue("kind", msg.kind)
   }
 
 }
 
-private isMuted() {
+private boolean isMuted() {
   return device.currentValue("mute") == "muted"
+}
+
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
+    logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
+  }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }

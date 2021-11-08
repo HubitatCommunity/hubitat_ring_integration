@@ -47,45 +47,69 @@ def refresh() {
 }
 
 def on() {
-  def data = ["on": true]
-  parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: device.getDataValue("src"), data: data])
+  parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: device.getDataValue("src"), data: ["on": true]])
 }
 
 def off() {
-  def data = ["on": false]
-  parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: device.getDataValue("src"), data: data])
+  parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: device.getDataValue("src"), data: ["on": false]])
 }
 
-def setValues(deviceInfo) {
+void setValues(final Map deviceInfo) {
   logDebug "updateDevice(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo.state?.on != null) {
-    checkChanged("switch", deviceInfo.state.on ? "on" : "off")
-  }
-  if (deviceInfo.batteryLevel != null) {
-    checkChanged("battery", deviceInfo.batteryLevel)
-  }
-  if (deviceInfo.tamperStatus) {
-    checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
-  }
+  if (deviceInfo.state != null) {
+    final Map deviceInfoState = deviceInfo.state
 
-  for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
-    if (deviceInfo[key]) {
-      state[key] = deviceInfo[key]
+    if (deviceInfoState.on != null) {
+      checkChanged("switch", deviceInfoState.on ? "on" : "off")
     }
   }
 
-  for(key in ['firmware', 'hardwareVersion']) {
-    if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
-      device.updateDataValue(key, deviceInfo[key])
+  if (deviceInfo.batteryLevel != null) {
+    checkChanged("battery", deviceInfo.batteryLevel, "%")
+  }
+
+  if (deviceInfo.tamperStatus != null) {
+    checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
+  }
+
+  if (deviceInfo.impulseType != null) {
+    final String impulseType = deviceInfo.impulseType
+    state.impulseType = impulseType
+    if (impulseType == "comm.heartbeat") {
+      sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
+    }
+  }
+
+  for(final String key in ['lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null) {
+      state[key] = keyVal
+    }
+  }
+
+  for(final String key in ['firmware', 'hardwareVersion']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null && device.getDataValue(key) != keyVal) {
+      device.updateDataValue(key, keyVal)
     }
   }
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
+void checkChanged(final String attribute, final newStatus, final String unit=null) {
   if (device.currentValue(attribute) != newStatus) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
     sendEvent(name: attribute, value: newStatus, unit: unit)
+  }
+}
+
+private String convertToLocalTimeString(final Date dt) {
+  final TimeZone timeZone = location?.timeZone
+  if (timeZone) {
+    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
+  }
+  else {
+    return dt.toString()
   }
 }

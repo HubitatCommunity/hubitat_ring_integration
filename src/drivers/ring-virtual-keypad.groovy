@@ -13,6 +13,8 @@
  *  for the specific language governing permissions and limitations under the License.
  */
 
+import groovy.transform.Field
+
 metadata {
   definition(name: "Ring Virtual Keypad", namespace: "ring-hubitat-codahq", author: "Ben Rimmasch",
     importUrl: "https://raw.githubusercontent.com/codahq/ring_hubitat_codahq/master/src/drivers/ring-virtual-keypad.groovy") {
@@ -21,7 +23,6 @@ metadata {
     capability "Audio Volume"
     capability "Battery"
 
-    attribute "mode", "string"
     attribute "brightness", "number"
     attribute "lastCheckin", "string"
 
@@ -36,9 +37,7 @@ metadata {
   }
 }
 
-private getVOLUME_INC() {
-  return 5 //somebody can make this a preference if they feel strongly about it
-}
+@Field static Integer VOLUME_INC = 5 //somebody can make this a preference if they feel strongly about it
 
 private logInfo(msg) {
   if (descriptionTextEnable) log.info msg
@@ -56,18 +55,18 @@ def setVolume(vol) {
   logDebug "Attempting to set volume."
   vol = vol > 100 ? 100 : vol
   vol = vol < 0 ? 0 : vol
-  if (vol == 0 && !isMuted()) {
-    state.prevVolume = device.currentValue("volume")
-    sendEvent(name: "mute", value: "muted")
-  }
-  else if (vol != 0 && isMuted()) {
-    sendEvent(name: "mute", value: "unmuted")
+
+  if (vol == 0) {
+    if (checkChanged("mute", "muted")) {
+      state.prevVolume = device.currentValue("volume")
+    }
   }
   else {
-    logDebug "No mute/unmute needed..."
+    checkChanged("mute", "unmuted")
   }
+
   if (device.currentValue("volume") != vol) {
-    def data = ["volume": (vol == null ? 50 : vol).toDouble() / 100]
+    Map data = ["volume": (vol == null ? 50 : vol).toDouble() / 100]
     parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: null, data: data])
   }
   else {
@@ -78,7 +77,7 @@ def setVolume(vol) {
 
 def volumeUp() {
   logDebug "Attempting to raise volume."
-  def nextVol = device.currentValue("volume") + VOLUME_INC
+  Integer nextVol = device.currentValue("volume") + VOLUME_INC
   if (nextVol <= 100) {
     setVolume(nextVol)
   }
@@ -90,7 +89,7 @@ def volumeUp() {
 
 def volumeDown() {
   logDebug "Attempting to lower volume."
-  def nextVol = device.currentValue("volume") - VOLUME_INC
+  Integer nextVol = device.currentValue("volume") - VOLUME_INC
   if (nextVol >= 0) {
     setVolume(nextVol)
   }
@@ -110,15 +109,11 @@ def unmute() {
   setVolume(state.prevVolume)
 }
 
-private isMuted() {
-  return device.currentValue("mute") == "muted"
-}
-
 def setBrightness(brightness) {
   logDebug "Attempting to set brightness ${brightness}."
   brightness = brightness > 100 ? 100 : brightness
   brightness = brightness < 0 ? 0 : brightness
-  def data = ["brightness": (brightness == null ? 100 : brightness).toDouble() / 100]
+  Map data = ["brightness": (brightness == null ? 100 : brightness).toDouble() / 100]
   parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: null, data: data])
 }
 
@@ -127,30 +122,22 @@ def refresh() {
   parent.simpleRequest("refresh", [dst: device.deviceNetworkId])
 }
 
-def stopMotion() {
+void stopMotion() {
   checkChanged("motion", "inactive")
 }
 
-def setValues(deviceInfo) {
+void setValues(final Map deviceInfo) {
   logDebug "updateDevice(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
 
-  //TODO: probably only when mode changes?
-  //if (params.mode && device.currentValue("mode") != params.mode) {
-  //  logInfo "Alarm mode for device ${device.label} is ${params.mode}"
-  //  sendEvent(name: "mode", value: params.mode)
-  //}
+  if (deviceInfo.state != null) {
+    final Map deviceInfoState = deviceInfo.state
 
-  if (deviceInfo.impulseType == "keypad.motion") {
-    checkChanged("motion", "active")
-    //The inactive message almost never comes reliably. for now we'll schedule it off
-    unschedule()
-    runIn(motionTimeout.toInteger(), stopMotion)
-  }
-
-  for(key in ['brightness', 'volume']) {
-    if (deviceInfo?.state?.get(key) != null) {
-      checkChanged(key, (deviceInfo.state[key] * 100) as Integer)
+    for (final String key in ['brightness', 'volume']) {
+      final keyVal = deviceInfoState.get(key)
+      if (keyVal != null) {
+        checkChanged(key, (keyVal * 100).toInteger())
+      }
     }
   }
 
@@ -158,42 +145,48 @@ def setValues(deviceInfo) {
     checkChanged("battery", deviceInfo.batteryLevel, "%")
   }
 
-  for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
-    if (deviceInfo[key]) {
-      state[key] = deviceInfo[key]
+  if (deviceInfo.impulseType != null) {
+    final String impulseType = deviceInfo.impulseType
+    state.impulseType = impulseType
+    if (impulseType == "comm.heartbeat") {
+      sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
+    } else if (value == "keypad.motion") {
+      checkChanged("motion", "active")
+      //The inactive message almost never comes reliably. for now we'll schedule it off
+      runIn(motionTimeout.toInteger(), stopMotion)
     }
   }
 
-  if (deviceInfo?.impulseType == "comm.heartbeat") {
-    sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
+  for(final String key in ['lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null) {
+      state[key] = keyVal
+    }
   }
 
-  for(key in ['firmware', 'hardwareVersion']) {
-    if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
-      device.updateDataValue(key, deviceInfo[key])
+  for(final String key in ['firmware', 'hardwareVersion']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null && device.getDataValue(key) != keyVal) {
+      device.updateDataValue(key, keyVal)
     }
   }
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }
 
-private convertToLocalTimeString(dt) {
-  def timeZoneId = location?.timeZone?.ID
-  if (timeZoneId) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", TimeZone.getTimeZone(timeZoneId))
+private String convertToLocalTimeString(final Date dt) {
+  final TimeZone timeZone = location?.timeZone
+  if (timeZone) {
+    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
   }
   else {
-    return "$dt"
+    return dt.toString()
   }
-}
-
-def childParse(type, params = []) {
-  logDebug "childParse(type, params)"
-  logTrace "type ${type}"
-  logTrace "params ${params}"
 }

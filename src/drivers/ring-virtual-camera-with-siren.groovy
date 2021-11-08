@@ -96,22 +96,17 @@ def both() {
   log.error "Both (strobe and siren) not implemented for device type ${device.getDataValue("kind")}"
 }
 
-
-def childParse(type, params) {
-  logDebug "childParse(type, msg)"
-  logTrace "type ${type}"
+void childParse(final String type, final Map params) {
+  logDebug "childParse(${type}, params)"
   logTrace "params ${params}"
 
   if (type == "refresh") {
-    logTrace "refresh"
     handleRefresh(params.msg)
   }
   else if (type == "device-set") {
-    logTrace "set"
-    handleSet(type, params)
+    handleSet(params)
   }
   else if (type == "dings") {
-    logTrace "dings"
     handleDings(params.type, params.msg)
   }
   else if (type == "snapshot-image") {
@@ -122,71 +117,69 @@ def childParse(type, params) {
   }
 }
 
-private handleRefresh(json) {
-  logDebug "handleRefresh(${json.description})"
+private void handleRefresh(final Map msg) {
+  logDebug "handleRefresh(${msg.description})"
 
-  if (json.battery_life != null) {
-    checkChanged("battery", json.battery_life)
+  if (msg.battery_life != null) {
+    checkChanged("battery", msg.battery_life)
   }
-  if (json.siren_status?.seconds_remaining != null) {
-    def value = json.siren_status.seconds_remaining > 0 ? "siren" : "off"
-    checkChanged("alarm", value)
-    if (value == "siren") {
-      runIn(json.siren_status.seconds_remaining + 1, refresh)
+  if (msg.siren_status?.seconds_remaining != null) {
+    final Integer seconds_remaining = msg.siren_status.seconds_remaining
+    checkChanged("alarm", seconds_remaining > 0 ? "siren" : "off")
+    if (seconds_remaining > 0) {
+      runIn(seconds_remaining + 1, refresh)
     }
   }
-  if (json.firmware_version && device.getDataValue("firmware") != json.firmware_version) {
-    device.updateDataValue("firmware", json.firmware_version)
+  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
+    device.updateDataValue("firmware", msg.firmware_version)
   }
 }
 
-private handleSet(id, params) {
-  logTrace "handleSet(${id}, ${params})"
+private void handleSet(final Map params) {
+  logTrace "handleSet(${params})"
   if (params.response != 200) {
     log.warn "Not successful?"
     return
   }
   if (params.action == "siren_on") {
-    def value = device.currentValue("alarm") == "both" ? "both" : "siren"
-    if (value != "both") {
-      logInfo "Device ${device.label} alarm is ${value}"
-      sendEvent(name: "alarm", value: value)
+    if (device.currentValue("alarm") != "both") {
+      checkChanged("alarm", "siren")
     }
     runIn(params.msg.seconds_remaining + 1, refresh)
   }
   else if (params.action == "siren_off") {
-    logInfo "Device ${device.label} alarm is off"
-    sendEvent(name: "alarm", value: "off")
+    checkChanged("alarm", "off")
   }
   else {
     log.error "Unsupported set ${params.action}"
   }
-
 }
 
-private handleDings(type, json) {
-  logTrace "json: ${json}"
-  if (json == null) {
-    checkChanged("motion", "inactive")
+private void handleDings(final String type, final Map msg) {
+  logTrace "msg: ${msg}"
+  if (msg == null) {
+    log.warn "Got a null msg!"
   }
-  else if (json.kind == "motion" && json.motion == true) {
+  else if (msg.kind == "motion" && msg.motion == true) {
     checkChanged("motion", "active")
-    unschedule(motionOff)
-  }
-  if (type == "IFTTT") {
-    def motionTimeout = 60
-    runIn(motionTimeout, motionOff)
+
+    if (type == "IFTTT") {
+      runIn(60, motionOff)
+    } else {
+      unschedule(motionOff)
+    }
   }
 }
 
-def motionOff(data) {
-  logDebug "motionOff($data)"
-  childParse("dings", [msg: null])
+void motionOff() {
+  checkChanged("motion", "inactive")
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }

@@ -13,6 +13,8 @@
  *  for the specific language governing permissions and limitations under the License.
  */
 
+import groovy.transform.Field
+
 metadata {
   definition(name: "Ring Virtual Smoke Alarm", namespace: "ring-hubitat-codahq", author: "Ben Rimmasch",
     importUrl: "https://raw.githubusercontent.com/codahq/ring_hubitat_codahq/master/src/drivers/ring-virtual-smoke-alarm.groovy") {
@@ -49,61 +51,74 @@ def refresh() {
   //parent.simpleRequest("refresh-device", [dni: device.deviceNetworkId])
 }
 
-def setValues(deviceInfo) {
+void setValues(final Map deviceInfo) {
   logDebug "updateDevice(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
 
-  /* this block possibly unecessary*/
-  if (deviceInfo?.state?.smoke != null) {
-    def alarmStatus = deviceInfo.state.smoke.alarmStatus
-    checkChanged("smoke", alarmStatus == "active" ? "detected" : (alarmStatus == "inactive" ? "clear" : "tested"))
-    if (deviceInfo.state.smoke.enabledTimeMs)
-      state.smokeEnabled = deviceInfo.state.smoke.enabledTimeMs
+  if (deviceInfo.state != null) {
+    final Map deviceInfoState = deviceInfo.state
+
+    if (deviceInfoState.smoke != null) {
+      final Map smoke = deviceInfoState.smoke
+
+      checkChanged("smoke", ALARM_STATUS.getOrDefault(smoke.alarmStatus, "tested"))
+      if (smoke.enabledTimeMs) {
+        state.smokeEnabled = smoke.enabledTimeMs
+      }
+    }
   }
-  /* end block */
-  if (deviceInfo?.state?.alarmStatus != null) {
-    def alarmStatus = deviceInfo.state.alarmStatus
-    checkChanged("smoke", alarmStatus == "active" ? "detected" : (alarmStatus == "inactive" ? "clear" : "tested"))
-    if (deviceInfo.state.enabledTimeMs)
-      state.smokeEnabled = deviceInfo.state.enabledTimeMs
-  }
+
   if (deviceInfo.batteryLevel != null) {
     checkChanged("battery", deviceInfo.batteryLevel, "%")
   }
-  if (deviceInfo.tamperStatus) {
+
+  if (deviceInfo.tamperStatus != null) {
     checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
   }
 
-  for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
-    if (deviceInfo[key]) {
-      state[key] = deviceInfo[key]
+  if (deviceInfo.impulseType != null) {
+    final String impulseType = deviceInfo.impulseType
+    state.impulseType = impulseType
+    if (impulseType == "comm.heartbeat") {
+      sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
     }
   }
 
-  if (deviceInfo?.impulseType == "comm.heartbeat") {
-    sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
+  for(final String key in ['lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null) {
+      state[key] = keyVal
+    }
   }
 
-  for(key in ['firmware', 'hardwareVersion']) {
-    if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
-      device.updateDataValue(key, deviceInfo[key])
+  for(final String key in ['firmware', 'hardwareVersion']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null && device.getDataValue(key) != keyVal) {
+      device.updateDataValue(key, keyVal)
     }
   }
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }
 
-private convertToLocalTimeString(dt) {
-  def timeZoneId = location?.timeZone?.ID
-  if (timeZoneId) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", TimeZone.getTimeZone(timeZoneId))
+private String convertToLocalTimeString(final Date dt) {
+  final TimeZone timeZone = location?.timeZone
+  if (timeZone) {
+    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
   }
   else {
-    return "$dt"
+    return dt.toString()
   }
 }
+
+@Field final static Map<String, String> ALARM_STATUS = [
+  active: 'detected',
+  inactive: 'clear',
+]

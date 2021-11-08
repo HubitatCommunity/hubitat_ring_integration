@@ -57,91 +57,104 @@ def refresh() {
   parent.refresh(device.getDataValue("zid"))
 }
 
-def setValues(deviceInfo) {
+void setValues(final Map deviceInfo) {
   logDebug "updateDevice(deviceInfo)"
   logTrace "deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
 
-  for(key in ['impulseType', 'lastCommTime', 'lastUpdate']) {
-    if (deviceInfo[key]) {
-      state[key] = deviceInfo[key]
+  if (deviceInfo.state != null) {
+    final Map deviceInfoState = deviceInfo.state
+
+    if (deviceInfoState.networks != null) {
+      final Map nw = deviceInfoState.networks
+
+      final Map ppp0 = nw.ppp0
+      if (ppp0 != null) {
+        if (ppp0.type) {
+          device.updateDataValue("ppp0Type", ppp0.type.capitalize())
+        }
+        if (ppp0.name) {
+          device.updateDataValue("ppp0Name", ppp0.name)
+        }
+        if (ppp0.rssi) {
+          device.updateDataValue("ppp0Rssi", ppp0.rssi.toString())
+        }
+
+        final String ppp0Type = device.getDataValue("ppp0Type")
+        final String ppp0Name = device.getDataValue("ppp0Name")
+        final String ppp0Rssi = device.getDataValue("ppp0Rssi")
+
+        logInfo "ppp0 ${ppp0Type} ${ppp0Name} RSSI ${RSSI}"
+        checkChanged('cellular', "${ppp0Name} RSSI ${ppp0Rssi}")
+        state.ppp0 = "${ppp0Name} RSSI ${ppp0Rssi}"
+      }
+
+      final Map wlan0 = nw.wlan0
+      if (wlan0 != null) {
+        if (wlan0.type) {
+          device.updateDataValue("wlan0Type", wlan0.type.capitalize())
+        }
+        if (wlan0.ssid) {
+          device.updateDataValue("wlan0Ssid", wlan0.ssid)
+        }
+        if (wlan0.rssi) {
+          device.updateDataValue("wlan0Rssi", wlan0.rssi.toString())
+        }
+
+        final String wlan0Type = device.getDataValue("wlan0Type")
+        final String wlan0Ssid = device.getDataValue("wlan0Ssid")
+        final String wlan0Rssi = device.getDataValue("wlan0Rssi")
+
+        logInfo "wlan0 ${wlan0Type} ${wlan0Ssid} RSSI ${RSSI}"
+        checkChanged('wifi', "${wlan0Ssid} RSSI ${wlan0Rssi}")
+        state.wlan0 = "${wlan0Ssid} RSSI ${wlan0Rssi}"
+      }
+    }
+
+    if (deviceInfoState.version != null) {
+      final Map version = deviceInfoState.version
+
+      if (deviceInfo.deviceType == "adapter.ringnet") {
+        for(final String key in ['buildNumber', 'nordicFirmwareVersion', 'softwareVersion']) {
+          final keyVal = version[key]
+          if (keyVal && device.getDataValue(key) != keyVal) {
+            device.updateDataValue(key, keyVal)
+          }
+        }
+      } else if (device.getDataValue("version") != version) {
+        device.updateDataValue("version", version.toString())
+      }
+    }
+
+    if (deviceInfoState.status == 'success') {
+      if (deviceInfo.deviceType == "halo-stats.latency") {
+        sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
+      }
     }
   }
 
-  if (deviceInfo.deviceType == "halo-stats.latency" && deviceInfo.state?.status == "success") {
-    sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
-  }
-  if (deviceInfo.state?.networks) {
-    def nw = deviceInfo.state.networks
-
-    if (nw.ppp0 != null) {
-      if (nw.ppp0?.type) {
-        device.updateDataValue("ppp0Type", nw.ppp0.type.capitalize())
-      }
-      if (nw.ppp0?.name) {
-        device.updateDataValue("ppp0Name", nw.ppp0.name)
-      }
-      if (nw.ppp0?.rssi) {
-        device.updateDataValue("ppp0Rssi", nw.ppp0.rssi.toString())
-      }
-
-      def type = device.getDataValue("ppp0Type")
-      def name = device.getDataValue("ppp0Name")
-      def rssi = device.getDataValue("ppp0Rssi")
-
-      logInfo "ppp0 ${type} ${name} RSSI ${RSSI}"
-      checkChanged('cellular', "${name} RSSI ${rssi}")
-      state.ppp0 = "${name} RSSI ${rssi}"
-    }
-
-    if (nw.wlan0 != null) {
-      if (nw.wlan0?.type) {
-        device.updateDataValue("wlan0Type", nw.wlan0.type.capitalize())
-      }
-      if (nw.wlan0?.ssid) {
-        device.updateDataValue("wlan0Ssid", nw.wlan0.ssid)
-      }
-      if (nw.wlan0?.rssi) {
-        device.updateDataValue("wlan0Rssi", nw.wlan0.rssi.toString())
-      }
-
-      def type = device.getDataValue("wlan0Type")
-      def ssid = device.getDataValue("wlan0Ssid")
-      def rssi = device.getDataValue("wlan0Rssi")
-
-      logInfo "wlan0 ${type} ${ssid} RSSI ${RSSI}"
-      checkChanged('wifi', "${ssid} RSSI ${rssi}")
-      state.wlan0 = "${ssid} RSSI ${rssi}"
-    }
-  }
-  if (deviceInfo.deviceType == "adapter.ringnet" && deviceInfo.state?.version) {
-    def version = deviceInfo.state.version
-
-    for(key in ['buildNumber', 'nordicFirmwareVersion', 'softwareVersion']) {
-      if (version[key] && device.getDataValue(key) != version[key]) {
-        device.updateDataValue(key, version[key])
-      }
-    }
-  }
-  else if (deviceInfo.state?.version) {
-    if (device.getDataValue("version") != deviceInfo.state?.version) {
-      device.updateDataValue("version", deviceInfo.state?.version.toString())
+  for(final String key in ['impulseType', 'lastCommTime', 'lastUpdate']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null) {
+      state[key] = keyVal
     }
   }
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }
 
-private convertToLocalTimeString(dt) {
-  def timeZoneId = location?.timeZone?.ID
-  if (timeZoneId) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", TimeZone.getTimeZone(timeZoneId))
+private String convertToLocalTimeString(final Date dt) {
+  final TimeZone timeZone = location?.timeZone
+  if (timeZone) {
+    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
   }
   else {
-    return "$dt"
+    return dt.toString()
   }
 }

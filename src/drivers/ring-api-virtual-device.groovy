@@ -93,8 +93,6 @@ def setMode(mode) {
 
 def initialize() {
   logDebug "initialize()"
-  //old method of getting websocket auth
-  //parent.simpleRequest("ws-connect", [dni: device.deviceNetworkId])
 
   initializeWatchdog()
 
@@ -116,8 +114,8 @@ def initializeWatchdog() {
 }
 
 def updated() {
+  state.remove("updatedDate")
   initialize()
-  //refresh()
 }
 
 /**
@@ -129,40 +127,41 @@ def createDevices(zid) {
   refresh(zid)
 }
 
-def setState(attr, value, type) {
-  if (type == "array-add") {
-    if (state."$attr" == null) {
-      state."$attr" = []
-    }
-    state."$attr" << value
-  }
-  else if (type == "bool-set") {
-    state."$attr" = value
-  }
-  else {
-    log.error "unknown type $type!"
-  }
+// @note Should only be called by Ring Connect app
+void setAlarmCapable(boolean alarmCapable) {
+  state.alarmCapable = alarmCapable
 }
 
-def resetState(attr) {
-  state.remove(attr)
+// @note Should only be called by Ring Connect app
+void setCreateableHubs(final HashSet<String> createableHubs) {
+  state.createableHubs = createableHubs
 }
 
-def isWebSocketCapable() {
-  return state.createableHubs && state.createableHubs.size() > 0
+HashSet<String> getCreateableHubs() {
+  final def tmp = state.createableHubs
+  if (tmp instanceof HashSet) {
+    return tmp
+  }
+  // Old versions stored createableHubs as a List. Convert it to a HashSet
+  state.createableHubs = tmp as HashSet<String>
+  return state.createableHubs
 }
 
-def isTypePresent(kind) {
+boolean isWebSocketCapable() {
+  return state.createableHubs != null && state.createableHubs.size() > 0
+}
+
+boolean isTypePresent(kind) {
   return getChildDevices()?.find {
     it.getDataValue("type") == kind
   } != null
 }
 
-def refresh(zid) {
+def refresh(final String zid=null) {
   logDebug "refresh(${zid})"
-  state.updatedDate = now()
-  state.hubs?.each { hub ->
-    if (hub.zid == zid || zid == null) {
+
+  for (final Map hub in state.hubs) {
+    if (zid == null || hub.zid == zid) {
       logInfo "Refreshing hub ${hub.zid} with kind ${hub.kind}"
       simpleRequest("refresh", [dst: hub.zid])
     }
@@ -179,17 +178,17 @@ def watchDogChecking() {
 }
 
 def websocketWatchdog() {
-  if (state?.lastWebSocketMsgTime == null) {
+  if (state.lastWebSocketMsgTime == null) {
     return
   }
 
   logTrace "websocketWatchdog(${watchDogInterval}) now:${now()} state.lastWebSocketMsgTime:${state.lastWebSocketMsgTime }"
 
-  double timeSinceContact = (now() - state.lastWebSocketMsgTime).abs() / 1000  // Time since last msg in seconds
+  Long timeSinceContact = (now() - state.lastWebSocketMsgTime).abs() / 1000 / 60 // Time since last msg in minutes
 
-  logDebug "Watchdog checking started. Time since last websocket msg: ${(timeSinceContact / 60).round(1)} minutes"
+  logDebug "Watchdog checking started. Time since last websocket msg: ${timeSinceContact} minutes"
 
-  if (timeSinceContact >= 60 * 5) {
+  if (timeSinceContact >= 5) {
     log.warn "Watchdog checking interval exceeded"
     if (!device.currentValue("websocket").equals("connected")) {
       reconnectWebSocket()
@@ -197,9 +196,8 @@ def websocketWatchdog() {
   }
 }
 
-def childParse(type, params = []) {
-  logDebug "childParse(type, params)"
-  logTrace "type ${type}"
+void childParse(final String type, final Map params = [:]) {
+  logDebug "childParse(${type}, params)"
   logTrace "params ${params}"
 
   if (type == "ws-connect" || type == "tickets") {
@@ -222,7 +220,7 @@ def childParse(type, params = []) {
   }
 }
 
-def simpleRequest(type, params = [:]) {
+void simpleRequest(final String type, final Map params = [:]) {
   logDebug "simpleRequest(${type})"
   logTrace "params: ${params}"
 
@@ -231,7 +229,7 @@ def simpleRequest(type, params = [:]) {
     parent.simpleRequest(type, [dni: params.dni, type: params.type])
   }
   else {
-    def request = JsonOutput.toJson(getRequests(params).getAt(type))
+    def request = JsonOutput.toJson(getRequests(type, params))
     logTrace "request: ${request}"
 
     if (request == null || type == "setcode" || type == "adduser" || type == "enableuser") {
@@ -248,128 +246,128 @@ def simpleRequest(type, params = [:]) {
   }
 }
 
-private getRequests(parts) {
+private List getRequests(final String type, final Map parts) {
   //logTrace "getRequest(parts)"
   //logTrace "parts: ${parts} ${parts.dni}"
   state.seq = (state.seq ?: 0) + 1 //annoyingly the code editor doesn't like the ++ operator
-  return [
-    "refresh": ["message", [msg: "DeviceInfoDocGetList", dst: parts.dst, seq: state.seq]],
-    "manager": ["message", [msg: "GetAdapterManagersList", dst: parts.dst, seq: state.seq]],//working but not used
-    "sysinfo": ["message", [msg: "GetSystemInformation", dst: parts.dst, seq: state.seq]],  //working but not used
-    "finddev": ["message", [   //working but not used
-      msg: "FindDevice",
-      datatype: "FindDeviceType",
-      body: [[adapterManagerName: parts.adapterId]],
-      dst: parts.dst,
-      seq: state.seq
-    ]],
-    /* not finished */
-    /*
-    "setcode": ["message", [
-      msg: "SetKeychainValue",
-      datatype: "KeychainSetValueType",
-      body: [[
-        zid: device.getDataValue("vault_zid"),
-        items: [
-          [
-            key: "master_key",
-            value: parts.master_key
-          ],
-          [
-            key: "access_code",
-            value: parts.code
-          ]
+
+  Map msg = [
+    dst: parts.dst,
+    seq: state.seq
+  ]
+
+  if (type == "refresh") {
+    msg.msg = "DeviceInfoDocGetList"
+  }
+  else if (type == "manager") {
+    msg.msg = "GetAdapterManagersList" // Working but not used
+  }
+  else if (type == "sysinfo") {
+    msg.msg = "GetSystemInformation" // Working but not used
+  }
+  else if (type == "finddev") {
+    //working but not used
+    msg.msg = "FindDevice"
+    msg.datatype = "FindDeviceType"
+    msg.body = [[adapterManagerName: parts.adapterId]]
+  }
+  /* not finished */
+  /*
+  else if (type == "setcode") {
+    msg.msg = "SetKeychainValue"
+    msg.datatype = "KeychainSetValueType"
+    msg.body = [[
+      zid: device.getDataValue("vault_zid"),
+      items: [
+        [
+          key: "master_key",
+          value: parts.master_key
+        ],
+        [
+          key: "access_code",
+          value: parts.code
         ]
-      ]],
-      dst: parts.dst,
-      seq: state.seq
-    ]],
-    "adduser": ["message", [
-      msg: "DeviceInfoSet",
-      datatype: "DeviceInfoSetType",
-      body: [[
-        zid: device.getDataValue("vault_zid"),
-        command: [v1: [[
-          commandType: "vault.add-user",
-          data: {
-            label:
-            parts.name
-          }
-        ]]]
-      ]],
-      dst: parts.dst,
-      seq: state.seq
-    ]],
-    "enableuser": ["message", [
-      msg: "DeviceInfoSet",
-      datatype: "DeviceInfoSetType",
-      body: [[
-        zid: parts.acess_code_zid,
-        command: [v1: [[
-          commandType: "security-panel.enable-user",
-          data: {
-            label:
-            parts.name
-          }
-        ]]]
-      ]],
-      dst: parts.dst,
-      seq: state.seq
-    ]],
-    "confirm": ["message", [   //not complete
-      msg: "SetKeychainValue",
-      datatype: "KeychainSetValueType",
-      body: [[
-        zid: device.getDataValue("vault_zid"),
-        items: [
-          [
-            key: "master_key",
-            value: parts.master_key
-          ]
+      ]
+    ]]
+  }
+  else if (type == "adduser") {
+    msg.msg = "DeviceInfoSet"
+    msg.datatype= "DeviceInfoSetType",
+    msg.body = [[
+      zid: device.getDataValue("vault_zid"),
+      command: [v1: [[
+        commandType: "vault.add-user",
+        data: {
+          label: parts.name
+        }
+      ]]]
+    ]]
+  }
+  else if (type == "enableuser") {
+    msg.msg = "DeviceInfoSet"
+    msg.datatype = "DeviceInfoSetType"
+    msg.body = [[
+      zid: parts.acess_code_zid,
+      command: [v1: [[
+        commandType: "security-panel.enable-user",
+        data: [
+          label: parts.name
         ]
-      ]],
-      dst: parts.dst,
-      seq: state.seq
-    ]],
-    "sync-code-to-device": ["message", [
-      msg: "DeviceInfoSet",
-      datatype: "DeviceInfoSetType",
-      body: [[
-        zid: device.getDataValue("vault_zid"),
-        command: [v1: [[
-          commandType: "vault.sync-code-to-device",
-          data: ["zid": parts.acess_code_zid, "key": parts.key_pos]
-        ]]]
-      ]],
-      dst: parts.dst,
-      seq: state.seq
-    ]],
-    */
-    "setcommand": ["message", [
-      body: [[
-        zid: parts.zid,
-        command: [v1: [[
-          commandType: parts.type,
-          data: parts.data
-        ]]]
-      ]],
-      datatype: "DeviceInfoSetType",
-      dst: parts.dst,
-      msg: "DeviceInfoSet",
-      seq: state.seq
-    ]],
-    "setdevice": ["message", [
-      body: [[
-        zid: parts.zid,
-        device: [v1:
-          parts.data
+      ]]]
+    ]]
+  }
+  else if (type == "confirm") {
+    // Not complete
+    msg.msg: "SetKeychainValue"
+    msg.datatype = "KeychainSetValueType"
+    msg.body = [[
+      zid: device.getDataValue("vault_zid"),
+      items: [
+        [
+          key: "master_key",
+          value: parts.master_key
         ]
-      ]],
-      datatype: "DeviceInfoSetType",
-      dst: parts.dst,
-      msg: "DeviceInfoSet",
-      seq: state.seq
-    ]],
+      ]
+    ]]
+  }
+  else if (type == "sync-code-to-device") {
+    msg.msg = "DeviceInfoSet"
+    msg.datatype = "DeviceInfoSetType"
+    msg.body = [[
+      zid: device.getDataValue("vault_zid"),
+      command: [v1: [[
+        commandType: "vault.sync-code-to-device",
+        data: [zid: parts.acess_code_zid, key: parts.key_pos]
+      ]]]
+    ]]
+  }
+  */
+  else if (type == "setcommand") {
+    msg.msg = "DeviceInfoSet"
+    msg.datatype = "DeviceInfoSetType"
+    msg.body = [[
+      zid: parts.zid,
+      command: [v1: [[
+        commandType: parts.type,
+        data: parts.data
+      ]]]
+    ]]
+  }
+  else if (type == "setdevice") {
+    msg.msg = "DeviceInfoSet"
+    msg.datatype = "DeviceInfoSetType"
+    msg.body = [[
+      zid: parts.zid,
+      device: [v1:
+        parts.data
+      ]
+    ]]
+  }
+  else {
+    return null
+  }
+
+  return ["message", msg]
 
     //future functionality maybe
     //set power save keypad   42["message",{"body":[{"zid":"[KEYPAD_ZID]","device":{"v1":{"powerSave":"extended"}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":7}]
@@ -379,15 +377,13 @@ private getRequests(parts) {
     //motion sensitivy motdet 42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","device":{"v1":{"sensitivity":1}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":11}]
     //more                    42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","device":{"v1":{"sensitivity":0}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":12}]
     //0 high, 1 mid, 2 low    42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","device":{"v1":{"sensitivity":2}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":13}]
-
-  ]
 }
 
-def sendMsg(String s) {
+void sendMsg(final String s) {
   interfaces.webSocket.sendMessage(s)
 }
 
-def webSocketStatus(String status) {
+void webSocketStatus(final String status) {
   logDebug "webSocketStatus(${status})"
 
   if (status.startsWith('failure: ')) {
@@ -413,29 +409,22 @@ def webSocketStatus(String status) {
   }
 }
 
-def initWebsocket(json) {
+void initWebsocket(json) {
   logDebug "initWebsocket(json)"
   logTrace "json: ${json}"
 
-  def wsUrl
+  String wsUrl
   if (json.server) {
     wsUrl = "wss://${json.server}/socket.io/?authcode=${json.authCode}&ack=false&EIO=3&transport=websocket"
   }
   else if (json.host) {
     wsUrl = "wss://${json.host}/socket.io/?authcode=${json.ticket}&ack=false&EIO=3&transport=websocket"
-    state.hubs = json.assets.findAll { state.createableHubs.contains(it.kind) }.collect { hub ->
+
+    final HashSet<String> createableHubs = getCreateableHubs()
+
+    state.hubs = json.assets.findAll { createableHubs.contains(it.kind) }.collect { hub ->
       [doorbotId: hub.doorbotId, kind: hub.kind, zid: hub.uuid]
     }
-    /*
-    if (!state.hubs) {
-      state.hubs = []
-    }
-    newHubs.each { nHub ->
-      def eHub = state.hubs.find {it.doorbotId == nHub.doorbotId}
-      if (!dHub) {
-        state.hubs << nHub
-      }
-    }*/
   }
   else {
     log.error "Can't find the server: ${json}"
@@ -455,7 +444,9 @@ def initWebsocket(json) {
     log.error "WebSocket connect failed"
     sendEvent(name: "websocket", value: "error")
     //let's try again in 15 minutes
-    if (state.reconnectDelay < 900) state.reconnectDelay = 900
+    if (state.reconnectDelay < 900) {
+      state.reconnectDelay = 900
+    }
     reconnectWebSocket()
   }
 }
@@ -464,7 +455,9 @@ def reconnectWebSocket() {
   // first delay is 2 seconds, doubles every time
   state.reconnectDelay = (state.reconnectDelay ?: 1) * 2
   // don't let delay get too crazy, max it out at 30 minutes
-  if (state.reconnectDelay > 1800) state.reconnectDelay = 1800
+  if (state.reconnectDelay > 1800) {
+    state.reconnectDelay = 1800
+  }
 
   //If the socket is unavailable, give it some time before trying to reconnect
   runIn(state.reconnectDelay, initialize)
@@ -482,64 +475,73 @@ def parse(String description) {
 
   state.lastWebSocketMsgTime = now()
 
-  if (description.equals("2")) {
+  if (description == "2") {
     //keep alive
     sendMsg("2")
   }
-  else if (description.equals("3")) {
+  else if (description == "3") {
     //Do nothing. keep alive response
   }
   else if (description.startsWith(MESSAGE_PREFIX)) {
-    def msg = description.substring(MESSAGE_PREFIX.length())
-    def slurper = new groovy.json.JsonSlurper()
-    def json = slurper.parseText(msg)
+    final String msg = description.substring(MESSAGE_PREFIX.length())
+    def json = new JsonSlurper().parseText(msg)
     //logTrace "json: $json"
 
-    def deviceInfos
+    List deviceInfos
 
-    if (json[0].equals("DataUpdate")) {
-      //only keep device infos for devices that were selected in the app
-      if (state.createableHubs.contains(json[1].context.assetKind)) {
+    if (json[0] == "DataUpdate") {
+      // Only create device infos for devices that were selected in the app
+      if (getCreateableHubs().contains(json[1].context.assetKind)) {
         deviceInfos = extractDeviceInfos(json[1])
       }
       //else {
       //  logTrace "Discarded update from hub ${json[1].context.assetKind}"
       //}
     }
-    else if (json[0].equals("message") && json[1].msg == "DeviceInfoDocGetList" && json[1].datatype == "DeviceInfoDocType") {
-      //only keep device infos for devices that were selected in the app
-      if (state.createableHubs.contains(json[1].context.assetKind)) {
-        deviceInfos = extractDeviceInfos(json[1])
-        //if the hub for these device infos doesn't exist then create it
-        if (!getChildByZID(json[1].context.assetId)) {
-          def d = createDevice([deviceType: json[1].context.assetKind, zid: json[1].context.assetId, src: json[1].src])
-          //might as well create the devices
-          state.createDevices = true
+    else if (json[0] == "message") {
+      if (json[1].msg == "DeviceInfoDocGetList" && json[1].datatype == "DeviceInfoDocType") {
+        final String assetKind = json[1].context.assetKind
+        final String assetId = json[1].context.assetId
+
+        // Only create device infos for devices that were selected in the app
+        final HashSet<String> createableHubs = state.createableHubs
+        if (createableHubs.contains(assetKind)) {
+          deviceInfos = extractDeviceInfos(json[1])
+          // If the hub for these device infos doesn't exist then create it
+          if (!getChildByZID(assetId)) {
+            createDevice([deviceType: assetKind, zid: assetId, src: json[1].src])
+            //might as well create the devices
+            state.createDevices = true
+          }
+        }
+        //else {
+        //  logTrace "Discarded device list from hub ${json[1].context.assetKind}"
+        //}
+      }
+      else if (json[1].msg == "DeviceInfoSet") {
+        if (json[1].status == 0) {
+          logTrace "DeviceInfoSet with seq ${json[1].seq} succeeded."
+        }
+        else {
+          log.warn "I think a DeviceInfoSet failed?"
+          log.warn description
         }
       }
-      //else {
-      //  logTrace "Discarded device list from hub ${json[1].context.assetKind}"
-      //}
-    }
-    else if (json[0].equals("message") && json[1].msg == "DeviceInfoSet") {
-      if (json[1].status == 0) {
-        logTrace "DeviceInfoSet with seq ${json[1].seq} succeeded."
+      else if (json[1].msg == "SetKeychainValue") {
+        if (json[1].status == 0) {
+          logTrace "SetKeychainValue with seq ${json[1].seq} succeeded."
+        }
+        else {
+          log.warn "I think a SetKeychainValue failed?"
+          log.warn description
+        }
       }
       else {
-        log.warn "I think a DeviceInfoSet failed?"
+        log.warn "huh? what's this?"
         log.warn description
       }
     }
-    else if (json[0].equals("message") && json[1].msg == "SetKeychainValue") {
-      if (json[1].status == 0) {
-        logTrace "SetKeychainValue with seq ${json[1].seq} succeeded."
-      }
-      else {
-        log.warn "I think a SetKeychainValue failed?"
-        log.warn description
-      }
-    }
-    else if (json[0].equals("disconnect")) {
+    else if (json[0] == "disconnect") {
       logInfo "Websocket timeout hit.  Reconnecting..."
       interfaces.webSocket.close()
       sendEvent(name: "websocket", value: "disconnect")
@@ -552,145 +554,145 @@ def parse(String description) {
       log.warn description
     }
 
-    deviceInfos.each {
-      logTrace "created deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(it))}"
+    final boolean createDevices = state.createDevices
 
-      if (it?.msg == "Passthru") {
-        sendPassthru(it)
+    for (final Map deviceInfo in deviceInfos) {
+      logTrace "created deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
+
+      if (deviceInfo.msg == "Passthru") {
+        sendPassthru(deviceInfo)
       }
       else {
-        if (state.createDevices) {
-          if (it.deviceType != "group.light-group.beams") {
-            createDevice(it)
+        final boolean isBeamsGroup = deviceInfo.deviceType == "group.light-group.beams"
+        if (createDevices) {
+          if (!isBeamsGroup) {
+            createDevice(deviceInfo)
           }
           else {
-            queueCreate(it)
+            queueCreate(deviceInfo)
           }
         }
-        if (it.deviceType != "group.light-group.beams") {
-          sendUpdate(it)
+        if (!isBeamsGroup) {
+          sendUpdate(deviceInfo)
         }
       }
     }
-    if (state.createDevices) {
+    if (createDevices) {
       processCreateQueue()
       state.createDevices = false
     }
   }
 }
 
-def extractDeviceInfos(json) {
+private void copyKeys(Map target, final Map source, final keys) {
+  copyKeys(target, source, keys.toSet())
+}
+
+private void copyKeys(Map target, final Map source, final Set<String> keys) {
+  for (final entry in source) {
+    final String name = entry.key
+
+    if (name in keys) {
+      target[name] = entry.value
+    }
+  }
+}
+
+@Field final static HashSet<String> contextKeys = ['affectedEntityType', 'affectedEntityId', 'affectedEntityName', 'assetId', 'eventLevel']
+
+@Field final static HashSet<String> deviceJsonGeneralKeys = ['acStatus', 'adapterType', 'batteryLevel', 'batteryStatus', 'componentDevices',
+                                                             'deviceType', 'fingerprint', 'lastUpdate', 'lastCommTime', 'manufacturerName',
+                                                             'name', 'nextExpectedWakeup', 'roomId', 'serialNumber', 'tamperStatus', 'zid']
+
+List extractDeviceInfos(final Map json) {
   logDebug "extractDeviceInfos(json)"
   //logTrace "json: ${JsonOutput.prettyPrint(JsonOutput.toJson(json))}"
 
-  //if (json.msg == "Passthru" && update.datatype == "PassthruType")
-  if (IGNORED_MSG_TYPES.contains(json.msg)) {
+  final String msg = json.msg
+
+  if (IGNORED_MSG_TYPES.contains(msg)) {
     return
   }
-  if (json.msg != "DataUpdate" && json.msg != "DeviceInfoDocGetList") {
-    logTrace "msg type: ${json.msg}"
+  if (msg != "DataUpdate" && msg != "DeviceInfoDocGetList") {
+    logTrace "msg type: ${msg}"
     logTrace "json: ${JsonOutput.prettyPrint(JsonOutput.toJson(json))}"
   }
 
-  def deviceInfos = []
+  List deviceInfos = []
 
-  //"lastUpdate": "",
-  //"contact": "closed",
-  //"motion": "inactive"
-
-  def defaultDeviceInfo = [
-    deviceType: '',
+  Map defaultDeviceInfo = [
     src: json.src,
-    msg: json.msg,
+    msg: msg,
   ]
 
   if (json.context) {
-    List keys = ['accountId', 'affectedEntityType', 'affectedEntityId', 'affectedEntityName', 'assetId', 'assetKind', 'eventOccurredTsMs']
-    for (key in keys) {
-      defaultDeviceInfo[key] = json.context[key]
-    }
-
-    defaultDeviceInfo.level = json.context.eventLevel
+    copyKeys(defaultDeviceInfo, json.context, contextKeys)
   }
 
   //iterate each device
-  json.body.each {
-    def curDeviceInfo = defaultDeviceInfo.clone()
+  for (final Map deviceJson in json.body) {
+    Map curDeviceInfo = defaultDeviceInfo.clone()
 
-    def deviceJson = it
     //logTrace "now deviceJson: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceJson))}"
     if (!deviceJson) {
+      log.warn "Received empty deviceJson"
       deviceInfos << curDeviceInfo
+      continue
     }
 
-    if (deviceJson?.general) {
-      def tmpGeneral = deviceJson.general?.v1 ?: deviceJson.general?.v2
-
-      List keys = ['acStatus', 'adapterType', 'batteryLevel', 'batteryStatus', 'deviceType', 'fingerprint', 'lastUpdate',
-                   'lastCommTime', 'manufacturerName', 'name', 'nextExpectedWakeup', 'roomId', 'serialNumber', 'tamperStatus', 'zid']
-      for (key in keys) {
-        curDeviceInfo[key] = tmpGeneral[key]
-      }
-
-      if (tmpGeneral.componentDevices) {
-        curDeviceInfo.componentDevices = tmpGeneral.componentDevices
-      }
-    }
-    if (deviceJson?.context || deviceJson?.adapter) {
-      def tmpAdapter = deviceJson.context?.v1?.adapter?.v1 ?: deviceJson.adapter?.v1
-
-      curDeviceInfo.signalStrength = tmpAdapter?.signalStrength
-      curDeviceInfo.firmware = tmpAdapter?.firmwareVersion
-      if (tmpAdapter?.fingerprint?.firmware?.version) {
-        curDeviceInfo.firmware = "${tmpAdapter.fingerprint.firmware.version}.${tmpAdapter.fingerprint.firmware?.subversion}"
-        curDeviceInfo.hardwareVersion = tmpAdapter.fingerprint?.hardwareVersion?.toString()
-      }
-
-      def tmpContext = deviceJson.context?.v1
-      curDeviceInfo.deviceName = tmpContext?.deviceName
-      curDeviceInfo.roomName = tmpContext?.roomName
-      if (curDeviceInfo.batteryStatus == null && tmpContext.batteryStatus != null) {
-        curDeviceInfo.batteryStatus = tmpContext.batteryStatus
-      }
-      if (curDeviceInfo.deviceType == "alarm.smoke" && tmpContext?.device?.v1?.alarmStatus) {
-        curDeviceInfo.state = [smoke: tmpContext.device.v1]
-      }
-    }
-    if (deviceJson?.impulse) {
-      def tmpImpulse = deviceJson.impulse?.v1[0]
-
-      curDeviceInfo.impulseType = tmpImpulse.impulseType
-
-      curDeviceInfo.impulses = deviceJson.impulse.v1.collectEntries {
-        [(it.impulseType): it.data]
-      }
-
-    }
-
-    if (deviceJson?.device) {
-      tmpDevice
-      //logTrace "what has this device? ${tmpDevice}"
-      if (deviceJson.device.v1) {
-        curDeviceInfo.state = deviceJson.device.v1
-        //curDeviceInfo.faulted = tmpDevice.faulted
-        //curDeviceInfo.mode = tmpDevice.mode
-      }
-
-    }
-
-    //likely a passthru
-    if (deviceJson?.data) {
+    // Likely a passthru
+    if (deviceJson.data) {
       assert curDeviceInfo.msg == 'Passthru'
       curDeviceInfo.state = deviceJson.data
       curDeviceInfo.zid = curDeviceInfo.assetId
       curDeviceInfo.deviceType = deviceJson.type
+    } else {
+      if (deviceJson.general) {
+        final Map tmpGeneral = deviceJson.general.v1 ?: deviceJson.general.v2
+
+        copyKeys(curDeviceInfo, tmpGeneral, deviceJsonGeneralKeys)
+      }
+
+      if (deviceJson.context || deviceJson.adapter) {
+        final Map tmpContext = deviceJson.context?.v1
+        final Map tmpAdapter = tmpContext?.adapter?.v1 ?: deviceJson.adapter?.v1
+
+        copyKeys(curDeviceInfo, tmpAdapter, ['firmwareVersion', 'signalStrength'])
+
+        final Map fingerprint = tmpAdapter?.fingerprint
+        if (fingerprint?.firmware?.version) {
+          curDeviceInfo.firmware = fingerprint.firmware.version.toString() + '.' + fingerprint.firmware.subversion.toString()
+          curDeviceInfo.hardwareVersion = fingerprint.hardwareVersion?.toString()
+        }
+
+        if (tmpContext != null) {
+          copyKeys(curDeviceInfo, tmpContext, ['batteryStatus', 'deviceName', 'roomName'])
+
+          if (curDeviceInfo.deviceType == "alarm.smoke" && tmpContext.device?.v1?.alarmStatus) {
+            curDeviceInfo.state = [smoke: tmpContext.device.v1]
+          }
+        }
+      }
+
+      if (deviceJson.impulse?.v1) {
+        final List tmpImpulses = deviceJson.impulse.v1
+
+        curDeviceInfo.impulseType = tmpImpulses[0].impulseType
+
+        Map impulses = [:]
+        for (final Map impulse in tmpImpulses) {
+          impulses[impulse.impulseType] = impulse.data
+        }
+        curDeviceInfo.impulses = impulses
+      }
+
+      if (deviceJson.device?.v1) {
+        curDeviceInfo.state = deviceJson.device.v1
+      }
     }
 
-    deviceInfos << curDeviceInfo
+    deviceInfos.add(curDeviceInfo)
 
-    //if (curDeviceInfo.deviceType == "range-extender.zwave") {
-    //  log.warn "range-extender.zwave message: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceJson))}"
-    //}
     if (curDeviceInfo.deviceType == null) {
       log.warn "null device type message?: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceJson))}"
     }
@@ -701,52 +703,61 @@ def extractDeviceInfos(json) {
   return deviceInfos
 }
 
-def createDevice(deviceInfo) {
+def createDevice(final Map deviceInfo) {
   logDebug "createDevice(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
 
-  //quick check
-  if (deviceInfo?.deviceType == null || DEVICE_TYPES.get(deviceInfo.deviceType)?.hidden) {
-    logDebug "Not a creatable device. ${deviceInfo.deviceType}"
+  final String deviceType = deviceInfo.deviceType
+
+  if (deviceType == null) {
+    logDebug "Not a creatable device. ${deviceType}"
+    return
+  }
+  Map mappedDeviceType = DEVICE_TYPES[deviceType]
+
+  if (mappedDeviceType == null) {
+    log.warn "Unsupported device type! ${deviceType}"
     return
   }
 
-  //deeper check to enable auto-create on initialize
-  if (!isHub(deviceInfo.deviceType)) {
-    def parentKind = state.hubs.find { it.zid == deviceInfo.src }.kind
-    if (!state.createableHubs.contains(parentKind)) {
+  if (mappedDeviceType.hidden) {
+    logDebug "Not a creatable device. ${deviceType}"
+    return
+  }
+
+  // Deeper check to enable auto-create on initialize
+  if (!isHub(deviceType)) {
+    final String parentKind = state.hubs.find { it.zid == deviceInfo.src }.kind
+
+    if (!getCreateableHubs().contains(parentKind)) {
       logDebug "not creating ${deviceInfo.name} because parent ${parentKind} is not creatable!"
       return
     }
   }
 
-  def d = getChildDevices()?.find {
-    it.deviceNetworkId == getFormattedDNI(deviceInfo.zid)
-  }
+  final String formattedDNI = getFormattedDNI(deviceInfo.zid)
+
+  def d = getChildDevice(formattedDNI)
   if (!d) {
-    //devices that have drivers that store in devices
-    log.warn "Creating a ${DEVICE_TYPES[deviceInfo.deviceType].name} (${deviceInfo.deviceType}) with dni: ${getFormattedDNI(deviceInfo.zid)}"
+    // Devices that have drivers that store in devices
+    log.warn "Creating a ${mappedDeviceType.name} (${deviceType}) with dni: ${formattedDNI}"
     try {
-      d = addChildDevice("ring-hubitat-codahq", DEVICE_TYPES[deviceInfo.deviceType].name, getFormattedDNI(deviceInfo.zid), data)
-      d.label = deviceInfo.name ?: DEVICE_TYPES[deviceInfo.deviceType].name
+      d = addChildDevice("ring-hubitat-codahq", mappedDeviceType.name, formattedDNI, data)
+      d.label = deviceInfo.name ?: mappedDeviceType.name
 
       d.updateDataValue("zid",  deviceInfo.zid)
       d.updateDataValue("fingerprint", deviceInfo.fingerprint ?: "N/A")
       d.updateDataValue("manufacturer", deviceInfo.manufacturerName ?: "Ring")
       d.updateDataValue("serial", deviceInfo.serialNumber ?: "N/A")
-      d.updateDataValue("type", deviceInfo.deviceType)
+      d.updateDataValue("type", deviceType)
       d.updateDataValue("src", deviceInfo.src)
 
-      //if (sensor.general.v2.deviceType == "security-panel") {
-      //  d.updateDataValue("hub-zid", hubNode.general.v2.zid)
-      //}
-
-      log.warn "Successfully added ${deviceInfo.deviceType} with dni: ${getFormattedDNI(deviceInfo.zid)}"
+      log.warn "Successfully added ${deviceType} with dni: ${formattedDNI}"
     }
     catch (e) {
-      if (e.toString().replace(DEVICE_TYPES[deviceInfo.deviceType].name, "") ==
+      if (e.toString().replace(mappedDeviceType.name, "") ==
         "com.hubitat.app.exception.UnknownDeviceTypeException: Device type '' in namespace 'ring-hubitat-codahq' not found") {
-        log.error '<b style="color: red;">The "' + DEVICE_TYPES[deviceInfo.deviceType].name + '" driver was not found and needs to be installed.</b>\r\n'
+        log.error '<b style="color: red;">The "' + mappedDeviceType.name + '" driver was not found and needs to be installed.</b>\r\n'
       }
       else {
         log.error "Error adding device: ${e}"
@@ -759,22 +770,22 @@ def createDevice(deviceInfo) {
   return d
 }
 
-def queueCreate(deviceInfo) {
-  if (!state.queuedCreates) {
+void queueCreate(final Map deviceInfo) {
+  if (state.queuedCreates == null) {
     state.queuedCreates = []
   }
-  state.queuedCreates << deviceInfo
+  state.queuedCreates.add(deviceInfo)
 }
 
-def processCreateQueue() {
-  state.queuedCreates.each {
+void processCreateQueue() {
+  for (it in state.queuedCreates) {
     createDevice(it)
     sendUpdate(it)
   }
   state.remove("queuedCreates")
 }
 
-def sendUpdate(deviceInfo) {
+void sendUpdate(final Map deviceInfo) {
   logDebug "sendUpdate(deviceInfo)"
   //logTrace "deviceInfo: ${deviceInfo}"
 
@@ -782,15 +793,15 @@ def sendUpdate(deviceInfo) {
     log.warn "No device or type"
     return
   }
-  if (DEVICE_TYPES[deviceInfo.deviceType] == null) {
+
+  final Map mappedDeviceType = DEVICE_TYPES[deviceInfo.deviceType]
+
+  if (mappedDeviceType == null) {
     log.warn "Unsupported device type! ${deviceInfo.deviceType}"
     return
   }
 
-  def dni = DEVICE_TYPES[deviceInfo.deviceType].hidden ? deviceInfo.assetId : deviceInfo.zid
-  def d = getChildDevices()?.find {
-    it.deviceNetworkId == getFormattedDNI(dni)
-  }
+  def d = getChildByZID(mappedDeviceType.hidden ? deviceInfo.assetId : deviceInfo.zid)
   if (!d) {
     if (!suppressMissingDeviceMessages) {
       log.warn "Couldn't find device ${deviceInfo.name ?: deviceInfo.deviceName} of type ${deviceInfo.deviceType} with zid ${deviceInfo.zid}"
@@ -814,16 +825,11 @@ def sendUpdate(deviceInfo) {
   }
 }
 
-def sendPassthru(deviceInfo) {
+void sendPassthru(final Map deviceInfo) {
   logDebug "sendPassthru(deviceInfo)"
   //logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo == null) {
-    log.warn "No data"
-  }
-  def d = getChildDevices()?.find {
-    it.deviceNetworkId == getFormattedDNI(deviceInfo.zid)
-  }
+  def d = getChildByZID(deviceInfo.zid)
   if (!d) {
     if (!suppressMissingDeviceMessages) {
       log.warn "Couldn't find device ${deviceInfo.zid} for passthru"
@@ -835,32 +841,26 @@ def sendPassthru(deviceInfo) {
   }
 }
 
-def String getFormattedDNI(id) {
-  return "RING||${id}"
+String getFormattedDNI(final String id) {
+  return 'RING||' + id.toString()
 }
 
-def String getRingDeviceId(dni) {
-  //logDebug "getRingDeviceId(dni)"
-  //logTrace "dni: ${dni}"
-  return dni?.split("||")?.getAt(1)
-}
-
-def getChildByZID(zid) {
+def getChildByZID(final String zid) {
   logDebug "getChildByZID(${zid})"
-  def d = getChildDevices()?.find { it.deviceNetworkId == getFormattedDNI(zid) }
+  def d = getChildDevice(getFormattedDNI(zid))
   logTrace "Found child ${d}"
   return d
 }
 
-def boolean isParentRequest(type) {
+boolean isParentRequest(type) {
   return ["refresh-security-device"].contains(type)
 }
 
-def isHub(kind) {
+boolean isHub(final String kind) {
   return HUB_TYPES.contains(kind)
 }
 
-@Field static def DEVICE_TYPES = [
+@Field final static Map DEVICE_TYPES = [
   //physical alarm devices
   "sensor.contact": [name: "Ring Virtual Contact Sensor", hidden: false],
   "sensor.tilt": [name: "Ring Virtual Contact Sensor", hidden: false],
@@ -897,15 +897,15 @@ def isHub(kind) {
   "adapter.ringnet": [name: "Ring Beams Ringnet Adapter", hidden: true]
 ]
 
-@Field static def IGNORED_MSG_TYPES = [
+@Field final static HashSet<String> IGNORED_MSG_TYPES = [
   "SessionInfo",
   "SubscriptionTopicsInfo"
 ]
 
-@Field static def HUB_TYPES = [
+@Field final static HashSet<String> HUB_TYPES = [
   "base_station_k1",
   "base_station_v1",
   "beams_bridge_v1"
 ]
 
-@Field static def MESSAGE_PREFIX = "42"
+@Field final static String MESSAGE_PREFIX = "42"

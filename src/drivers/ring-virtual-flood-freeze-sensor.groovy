@@ -50,55 +50,69 @@ def refresh() {
   //parent.simpleRequest("refresh-device", [dni: device.deviceNetworkId])
 }
 
-def setValues(deviceInfo) {
+void setValues(final Map deviceInfo) {
   logDebug "updateDevice(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo?.state?.faulted != null) {
-    if (deviceInfo.state.flood?.faulted != null) {
-      checkChanged("water", deviceInfo.state.flood.faulted ? "wet" : "dry")
-    }
-    if (deviceInfo.state.freeze?.faulted != null) {
-      checkChanged("freeze", deviceInfo.state.freeze.faulted ? "detected" : "clear")
+  if (deviceInfo.state != null) {
+    final Map deviceInfoState = deviceInfo.state
+
+    if (deviceInfoState.faulted != null) {
+      if (deviceInfoState.flood?.faulted != null) {
+        checkChanged("water", deviceInfoState.flood.faulted ? "wet" : "dry")
+      }
+      if (deviceInfoState.freeze?.faulted != null) {
+        checkChanged("freeze", deviceInfoState.freeze.faulted ? "detected" : "clear")
+      }
     }
   }
+
   if (deviceInfo.batteryLevel != null) {
     checkChanged("battery", deviceInfo.batteryLevel, "%")
   }
-  if (deviceInfo.tamperStatus) {
+
+  if (deviceInfo.tamperStatus != null) {
     checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
   }
 
-  for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
-    if (deviceInfo[key]) {
-      state[key] = deviceInfo[key]
+  if (deviceInfo.impulseType != null) {
+    final String impulseType = deviceInfo.impulseType
+    state.impulseType = impulseType
+    if (impulseType == "comm.heartbeat") {
+      sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
     }
   }
 
-  if (deviceInfo?.impulseType == "comm.heartbeat") {
-    sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
+  for(final String key in ['lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null) {
+      state[key] = keyVal
+    }
   }
 
-  for(key in ['firmware', 'hardwareVersion']) {
-    if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
-      device.updateDataValue(key, deviceInfo[key])
+  for(final String key in ['firmware', 'hardwareVersion']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null && device.getDataValue(key) != keyVal) {
+      device.updateDataValue(key, keyVal)
     }
   }
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }
 
-private convertToLocalTimeString(dt) {
-  def timeZoneId = location?.timeZone?.ID
-  if (timeZoneId) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", TimeZone.getTimeZone(timeZoneId))
+private String convertToLocalTimeString(final Date dt) {
+  final TimeZone timeZone = location?.timeZone
+  if (timeZone) {
+    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
   }
   else {
-    return "$dt"
+    return dt.toString()
   }
 }

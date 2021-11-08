@@ -52,49 +52,59 @@ def refresh() {
 
 def on() {
   logDebug "Attempting to turn the light on."
-  def data = ["lightMode": "on", "duration": 60]
-  parent.simpleRequest("setcommand", [type: "light-mode.set", zid: device.getDataValue("zid"), dst: device.getDataValue("src"), data: data])
+  parent.simpleRequest("setcommand", [type: "light-mode.set", zid: device.getDataValue("zid"), dst: device.getDataValue("src"),
+                                      data: [lightMode: "on", duration: 60]])
 }
 
 def off() {
   logDebug "Attempting to turn the light off."
-  def data = ["lightMode": "default"]
-  parent.simpleRequest("setcommand", [type: "light-mode.set", zid: device.getDataValue("zid"), dst: device.getDataValue("src"), data: data])
+  parent.simpleRequest("setcommand", [type: "light-mode.set", zid: device.getDataValue("zid"), dst: device.getDataValue("src"),
+                                      data: [lightMode: "default"]])
 }
 
-def setValues(deviceInfo) {
+void setValues(final Map deviceInfo) {
   logDebug "updateDevice(deviceInfo)"
   logTrace "deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
 
-  if (deviceInfo?.state?.motionStatus != null) {
-    checkChanged("motion", deviceInfo.state.motionStatus == "clear" ? "inactive" : "active")
-  }
-  if (deviceInfo?.state?.on != null) {
-    checkChanged("switch", deviceInfo.state.on ? "on" : "off")
-  }
+  if (deviceInfo.state != null) {
+    final Map deviceInfoState = deviceInfo.state
 
-  for(key in ['impulseType', 'lastCommTime', 'lastUpdate']) {
-    if (deviceInfo[key]) {
-      state[key] = deviceInfo[key]
+    if (deviceInfoState.motionStatus != null) {
+      checkChanged("motion", deviceInfoState.motionStatus == "clear" ? "inactive" : "active")
+    }
+
+    if (deviceInfoState.on != null) {
+      checkChanged("switch", deviceInfoState.on ? "on" : "off")
+    }
+
+    if (deviceInfoState.groupMembers != null) {
+      Map members = [:]
+      for(groupMemeber in deviceInfoState.groupMembers) {
+        def d = parent.getChildByZID(it)
+        if (d) {
+          members[d.deviceNetworkId] = d.label
+        }
+        else {
+          log.warn "Device ${it} isn't created in Hubitat and will not be included in this group's members."
+        }
+      }
+      state.members = members
     }
   }
 
-  if (deviceInfo.state?.groupMembers) {
-    state.members = deviceInfo.state.groupMembers?.collectEntries {
-      def d = parent.getChildByZID(it)
-      if (d) {
-        [(d.deviceNetworkId): d.label]
-      }
-      else {
-        log.warn "Device ${it} isn't created in Hubitat and will not be included in this group's members."
-      }
+  for(final String key in ['impulseType', 'lastCommTime', 'lastUpdate']) {
+    final keyVal = deviceInfo[key]
+    if (keyVal != null) {
+      state[key] = keyVal
     }
   }
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }

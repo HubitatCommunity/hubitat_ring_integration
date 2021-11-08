@@ -74,17 +74,14 @@ def getDings() {
   parent.simpleRequest("dings")
 }
 
-def childParse(type, params) {
-  logDebug "childParse(type, msg)"
-  logTrace "type ${type}"
+void childParse(final String type, final Map params) {
+  logDebug "childParse(${type}, params)"
   logTrace "params ${params}"
 
   if (type == "refresh") {
-    logTrace "refresh"
     handleRefresh(params.msg)
   }
   else if (type == "dings") {
-    logTrace "dings"
     handleDings(params.type, params.msg)
   }
   else {
@@ -92,44 +89,46 @@ def childParse(type, params) {
   }
 }
 
-private handleRefresh(json) {
-  logDebug "handleRefresh(${json.description})"
+private void handleRefresh(final Map msg) {
+  logDebug "handleRefresh(${msg})"
 
-  if (json.battery_life != null && !["jbox_v1", "lpd_v1", "lpd_v2"].contains(device.getDataValue("kind"))) {
-    checkChanged("battery", json.battery_life)
+  if (msg.battery_life != null && !["jbox_v1", "lpd_v1", "lpd_v2"].contains(device.getDataValue("kind"))) {
+    checkChanged("battery", msg.battery_life)
   }
-  if (json.firmware_version && device.getDataValue("firmware") != json.firmware_version) {
-    device.updateDataValue("firmware", json.firmware_version)
+  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
+    device.updateDataValue("firmware", msg.firmware_version)
   }
 }
 
-private handleDings(type, json) {
-  logTrace "json: ${json}"
-  if (json == null) {
-    checkChanged("motion", "inactive")
+private void handleDings(final String type, final Map msg) {
+  logTrace "msg: ${msg}"
+  if (msg == null) {
+    log.warn "Got a null msg!"
   }
-  else if (json.kind == "motion" && json.motion == true) {
+  else if (msg.kind == "motion" && msg.motion == true) {
     checkChanged("motion", "active")
-    unschedule(motionOff)
+
     if (type == "IFTTT") {
-      def motionTimeout = 60
-      runIn(motionTimeout, motionOff)
+      runIn(60, motionOff)
+    } else {
+      unschedule(motionOff)
     }
   }
-  else if (json.kind == "ding") {
+  else if (msg.kind == "ding") {
     logInfo "${device.label} button 1 was pushed"
     sendEvent(name: "pushed", value: 1, isStateChange: true)
   }
 }
 
-def motionOff(data) {
-  logDebug "motionOff($data)"
-  childParse("dings", [msg: null])
+void motionOff() {
+  checkChanged("motion", "inactive")
 }
 
-def checkChanged(attribute, newStatus, unit=null) {
-  if (device.currentValue(attribute) != newStatus) {
+boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
+  final boolean changed = device.currentValue(attribute) != newStatus
+  if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
-    sendEvent(name: attribute, value: newStatus, unit: unit)
   }
+  sendEvent(name: attribute, value: newStatus, unit: unit)
+  return changed
 }
