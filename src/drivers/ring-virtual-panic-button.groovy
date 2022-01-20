@@ -11,10 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2020-08-16: Initial
  */
 
 metadata {
@@ -64,17 +60,17 @@ def setValues(deviceInfo) {
   if (deviceInfo.tamperStatus) {
     checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
   }
-  
+
   for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
     if (deviceInfo[key]) {
       state[key] = deviceInfo[key]
     }
   }
-  
+
   if (deviceInfo?.impulseType == "comm.heartbeat") {
     sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
   }
-  
+
   for(key in ['firmware', 'hardwareVersion']) {
     if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
       device.updateDataValue(key, deviceInfo[key])

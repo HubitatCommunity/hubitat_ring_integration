@@ -11,15 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-11-10: Initial
- *  2019-11-13: Added battery level support
- *  2019-11-15: Import URL
- *  2019-11-18: Differentiated between ring and motion events
- *  2020-02-29: Changed namespace
- *  2020-05-19: Snapshot preference
  */
 
 metadata {

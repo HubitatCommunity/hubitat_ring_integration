@@ -11,47 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-03-02: Initial
- *  2019-11-10: 2FA Support
- *              Polling for dings
- *              New devices
- *  2019-11-11: Mappings for more devices to existing drivers
- *  2019-11-12: Finished IFTTT/Webhooks support for motion and ring event
- *  2019-11-15: Mappings for more devices to existing drivers
- *              Support to reset OAuth access token
- *  2019-11-18: Differentiated between ring and motion events
- *  2019-12-20: API changes to accommodate Ring upstream API changes
- *              Changed minimum polling for dings to 8 seconds
- *              Added support for new cameras doorbells
- *              Started tinkering with getting thumbnails
- *              Captured too many attempt errors and killed additional attempts
- *              Changed the way hardware IDs are generated to match Ring again i.e. moved to GUID
- *  2020-02-12: Started to comment out session code for deletion since it Ring does not seem to use it any longer
- *              Handled malformed user JSON coming from IFTTT gracefully
- *              Fixed mapping for original Stick Up Cam
- *              Added some snapshot image calls (these won't work until HE changes their async methods to support images)
- *  2020-02-29: Chime Pro v2 support
- *              Removed session functionality since it's no longer needed
- *              Changed namespace
- *  2020-05-11: Made 2FA true and read-only
- *              Support for non-alarm modes (Ring Modes)
- *              Support to auto-create hub/bridge devices
- *              Changes to make dual app, multi-location available (but not implemented yet)
- *              IFTTT page enhancements
- *              Create device enhancements
- *  2020-05-17  Scheduled refresh OAuth token
- *              Cleaned up initialize and scheduling so polling would persist better after restarts
- *  2020-05-19  Snapshot (camera thumbnails) support with documentation, polling and configuration links
- *              Updated user agent on some API calls. This may cause a new device to show logged in under Ring Control Center
- *  2020-07-22: Added support for second device ID of wired Spotlight Cam
- *  2021-05-02: Added support for second device ID of Ring Video Doorbell Pro 2
- *  2021-06-30: Added support for Ring Floodlight Cam Wired Plus
- *  2021-07-30: Fixed Locations API
- *
- *
  */
 
 import groovyx.net.http.ContentType
@@ -1817,7 +1776,7 @@ def isOAuthEnabled() {
   "chime": [name: "Ring Chime", driver: "Ring Virtual Chime", dingable: false],
   "cocoa_camera": [name: "Ring Stick Up Cam", driver: "Ring Virtual Camera with Siren", dingable: true],
   "cocoa_doorbell": [name: "Ring Video Doorbell 2020", driver: "Ring Virtual Camera", dingable: true],
-  "cocoa_floodlight": [name: "Ring Floodlight Cam Wired Plus", driver: "Ring Virtual Light with Siren", dingable: true], 
+  "cocoa_floodlight": [name: "Ring Floodlight Cam Wired Plus", driver: "Ring Virtual Light with Siren", dingable: true],
   "doorbell_portal": [name: "Ring Peephole Cam", driver: "Ring Virtual Camera", dingable: true],
   "doorbell_scallop_lite": [name: "Ring Video Doorbell 3", driver: "Ring Virtual Camera", dingable: true],
   "doorbell_scallop": [name: "Ring Video Doorbell 3 Plus", driver: "Ring Virtual Camera", dingable: true],

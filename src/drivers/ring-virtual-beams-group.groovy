@@ -11,15 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-04-26: Initial
- *  2019-11-15: Import URL
- *  2020-02-12: Fixed odd behavior for when a group is added that has a member that isn't created
- *  2020-02-29: Changed namespace
- *  2021-08-16: Remove unnecessary safe object traversal
- *              Reduce repetition in some of the code
  */
 
 import groovy.json.JsonOutput
@@ -81,7 +72,7 @@ def setValues(deviceInfo) {
   if (deviceInfo?.state?.on != null) {
     checkChanged("switch", deviceInfo.state.on ? "on" : "off")
   }
-  
+
   for(key in ['impulseType', 'lastCommTime', 'lastUpdate']) {
     if (deviceInfo[key]) {
       state[key] = deviceInfo[key]

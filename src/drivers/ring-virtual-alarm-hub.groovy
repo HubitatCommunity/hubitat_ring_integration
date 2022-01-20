@@ -11,17 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-04-26: Initial
- *  2019-11-15: Import URL
- *  2019-12-20: Added description to syncing preference for clarity
- *  2020-01-09: Fixed update to HSM status to only happen when necessary
- *              Added fireAlarm attribute to hold fire alarm status
- *  2020-02-29: Changed namespace
- *  2020-05-16: Fixed base station brightness command
- *  2021-08-16: Remove unnecessary safe object traversal
  */
 
 import groovy.json.JsonOutput
@@ -301,19 +290,19 @@ def setValues(deviceInfo) {
     checkChanged("acStatus", acStatus == "ok" ? "connected" : (acStatus == "error" ? "disconnected" : "brownout"))
     checkChanged("powerSource", acStatus == "ok" ? "mains" : (acStatus == "error" ? "battery" : "unknown"))
   }
-  
+
   for(key in ['brightness', 'volume']) {
     if (deviceInfo?.state?.get(key) != null) {
       checkChanged(key, (deviceInfo.state[key] * 100) as Integer)
     }
   }
-  
+
   for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
     if (deviceInfo[key]) {
       state[key] = deviceInfo[key]
     }
-  }  
-  
+  }
+
   if (deviceInfo.firmware && device.getDataValue("firmware") != deviceInfo.firmware) {
     device.updateDataValue("firmware", deviceInfo.firmware)
   }
@@ -353,7 +342,7 @@ def setValues(deviceInfo) {
       if (nw.wlan0?.rssi) {
         device.updateDataValue("wlan0Rssi", nw.wlan0.rssi.toString())
       }
-      
+
       def type = device.getDataValue("wlan0Type")
       def ssid = device.getDataValue("wlan0Ssid")
       def rssi = device.getDataValue("wlan0Rssi")

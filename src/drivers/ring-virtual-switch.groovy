@@ -11,13 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-11-12: Initial
- *  2019-11-15: Import URL
- *  2020-02-29: Changed namespace
- *  2021-08-16: Reduce repetition in some of the code
  */
 
 metadata {
@@ -82,7 +75,7 @@ def setValues(deviceInfo) {
       state[key] = deviceInfo[key]
     }
   }
-  
+
   for(key in ['firmware', 'hardwareVersion']) {
     if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
       device.updateDataValue(key, deviceInfo[key])

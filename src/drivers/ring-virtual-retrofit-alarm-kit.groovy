@@ -11,11 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2020-02-29: Initial
- *  2021-08-16: Reduce repetition in some of the code
  */
 
 import groovy.json.JsonOutput
@@ -74,11 +69,11 @@ def setValues(deviceInfo) {
       state[key] = deviceInfo[key]
     }
   }
-  
+
   if (deviceInfo?.impulseType == "comm.heartbeat") {
     sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
   }
-  
+
   for(key in ['firmware', 'hardwareVersion']) {
     if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
       device.updateDataValue(key, deviceInfo[key])

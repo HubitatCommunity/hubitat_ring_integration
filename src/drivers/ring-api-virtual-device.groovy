@@ -11,26 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-03-24: Initial
- *  2019-11-15: Import URL
- *  2019-12-20: Support for First Alert Smoke/CO Alarm (probably battery only)
- *  2020-02-11: Support for tilt sensors (using the contact sensor driver)
- *              Support for the Ring Flood & Freeze Sensor
- *              Updated to the documented location of the websocket client
- *              Added an informational log when the websocket timeout it received
- *  2020-02-29: Support for Retrofit Alarm Kit
- *              Supressed more websocket nonsense logging errors
- *              Changed namespace
- *  2020-05-11: Support for non-alarm modes (Ring Modes)
- *              Changes to auto-create hub/bridge devices
- *              Optimization around uncreated devices
- *  2020-12-01: Fix bug with how device data fields are set. Caused device commands to fail in hubitat v2.2.4
- *  2021-08-16: Watchdog is now based on receipt of websocket messages. Should make reconnection more robust
- *              Remove unnecessary safe object traversal
- *              Reduce repetition in some of the code
  */
 
 import groovy.json.JsonSlurper

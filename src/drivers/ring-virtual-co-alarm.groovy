@@ -11,13 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-12-20: Initial
- *  2020-02-12: Fixed battery % to show correctly in dashboards
- *  2020-02-29: Changed namespace
- *  2021-08-16: Reduce repetition in some of the code
  */
 
 metadata {
@@ -70,13 +63,13 @@ def setValues(deviceInfo) {
   if (deviceInfo.tamperStatus) {
     checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
   }
-  
+
   for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
     if (deviceInfo[key]) {
       state[key] = deviceInfo[key]
     }
   }
-  
+
   for(key in ['firmware', 'hardwareVersion']) {
     if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
       device.updateDataValue(key, deviceInfo[key])

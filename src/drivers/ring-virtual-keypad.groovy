@@ -11,20 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-04-26: Initial
- *  2019-11-15: Import URL
- *  2020-01-11: Fixed motion sensing capabilities (I noticed there is a new impulse type of "keypad.motion" so the websocket
- *                now returns enough information to somewhat reliably do this.  It's like they can hear my thoughts.  As of
- *                this change the active message comes reliably but the inactive message does not.  For this reason I just
- *                schedule off the motion instead.  Maybe at some later date I can change it to turn off when a message is
- *                received.)
- *  2020-02-12: Fixed battery % to show correctly in dashboards
- *  2020-02-29: Added checkin event
- *              Changed namespace
- *  2021-08-16: Reduce repetition in some of the code
  */
 
 metadata {
@@ -161,13 +147,13 @@ def setValues(deviceInfo) {
     unschedule()
     runIn(motionTimeout.toInteger(), stopMotion)
   }
-  
+
   for(key in ['brightness', 'volume']) {
     if (deviceInfo?.state?.get(key) != null) {
       checkChanged(key, (deviceInfo.state[key] * 100) as Integer)
     }
   }
-  
+
   if (deviceInfo.batteryLevel != null) {
     checkChanged("battery", deviceInfo.batteryLevel, "%")
   }
@@ -177,11 +163,11 @@ def setValues(deviceInfo) {
       state[key] = deviceInfo[key]
     }
   }
-  
+
   if (deviceInfo?.impulseType == "comm.heartbeat") {
     sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
   }
-  
+
   for(key in ['firmware', 'hardwareVersion']) {
     if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
       device.updateDataValue(key, deviceInfo[key])

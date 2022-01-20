@@ -11,17 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-04-26: Initial
- *  2019-11-15: Import URL
- *  2020-02-12: Fixed battery % to show correctly in dashboards
- *  2020-02-29: Added checkin event
- *              Changed namespace
- *  2020-05-06: Added "PowerSource" capability
- *              Changed acStatus values to match closer to Ring's documentation labels for those alerts
- *  2021-08-16: Reduce repetition in some of the code
  */
 
 metadata {
@@ -76,17 +65,17 @@ def setValues(deviceInfo) {
   if (deviceInfo.batteryStatus != null /*&& deviceInfo.impulses?."battery.changed-out-of-band" != null*/) {
     checkChanged("batteryStatus", deviceInfo.batteryStatus)
   }
-  
+
   for(key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
     if (deviceInfo[key]) {
       state[key] = deviceInfo[key]
     }
   }
-  
+
   if (deviceInfo?.impulseType == "comm.heartbeat") {
     sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()), displayed: false, isStateChange: true)
   }
-  
+
   for(key in ['firmware', 'hardwareVersion']) {
     if (deviceInfo[key] && device.getDataValue(key) != deviceInfo[key]) {
       device.updateDataValue(key, deviceInfo[key])

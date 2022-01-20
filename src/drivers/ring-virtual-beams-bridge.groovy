@@ -11,15 +11,6 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
- *
- *
- *  Change Log:
- *  2019-04-26: Initial
- *  2019-11-15: Import URL
- *  2020-02-29: Added checkin event
- *              Changed namespace
- *  2021-08-16: Remove unnecessary safe object traversal
- *              Reduce repetition in some of the code
  */
 
 import groovy.json.JsonOutput
@@ -124,7 +115,7 @@ def setValues(deviceInfo) {
   }
   if (deviceInfo.deviceType == "adapter.ringnet" && deviceInfo.state?.version) {
     def version = deviceInfo.state.version
-      
+
     for(key in ['buildNumber', 'nordicFirmwareVersion', 'softwareVersion']) {
       if (version[key] && device.getDataValue(key) != version[key]) {
         device.updateDataValue(key, version[key])
