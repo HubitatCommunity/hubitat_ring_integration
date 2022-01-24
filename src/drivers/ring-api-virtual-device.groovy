@@ -386,13 +386,8 @@ private List getRequests(final String type, final Map parts) {
   return ["message", msg]
 
     //future functionality maybe
-    //set power save keypad   42["message",{"body":[{"zid":"[KEYPAD_ZID]","device":{"v1":{"powerSave":"extended"}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":7}]
-    //set power save off keyp 42["message",{"body":[{"zid":"[KEYPAD_ZID]","device":{"v1":{"powerSave":"off"}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":8}]
     //test mode motion detctr 42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","command":{"v1":[{"commandType":"detection-test-mode.start","data":{}}]}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":9}]
     //cancel test above       42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","command":{"v1":[{"commandType":"detection-test-mode.cancel","data":{}}]}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":10}]
-    //motion sensitivy motdet 42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","device":{"v1":{"sensitivity":1}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":11}]
-    //more                    42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","device":{"v1":{"sensitivity":0}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":12}]
-    //0 high, 1 mid, 2 low    42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","device":{"v1":{"sensitivity":2}}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":13}]
 }
 
 void sendMsg(final String s) {
@@ -655,7 +650,7 @@ def parse(String description) {
     final boolean createDevices = state.createDevices
 
     for (final Map deviceInfo in deviceInfos) {
-      logTrace "created deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
+      logTrace "created deviceInfo: ${JsonOutput.toJson(deviceInfo)}"
 
       if (deviceInfo.msg == "Passthru") {
         sendPassthru(deviceInfo)
@@ -723,13 +718,13 @@ private void copyKeys(Map target, final Map source, final Set<String> keys) {
 
 List extractDeviceInfos(final Map json) {
   logDebug "extractDeviceInfos(json)"
-  //logTrace "json: ${JsonOutput.prettyPrint(JsonOutput.toJson(json))}"
+  //logTrace "json: ${JsonOutput.toJson(json)}"
 
   final String msg = json.msg
 
   if (msg != "DataUpdate" && msg != "DeviceInfoDocGetList") {
     logTrace "msg type: ${msg}"
-    logTrace "json: ${JsonOutput.prettyPrint(JsonOutput.toJson(json))}"
+    logTrace "json: ${JsonOutput.toJson(json)}"
   }
 
   List deviceInfos = []
@@ -747,7 +742,7 @@ List extractDeviceInfos(final Map json) {
   for (final Map deviceJson in json.body) {
     Map curDeviceInfo = defaultDeviceInfo.clone()
 
-    //logTrace "now deviceJson: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceJson))}"
+    //logTrace "now deviceJson: ${JsonOutput.toJson(deviceJson)}"
     if (!deviceJson) {
       log.warn "Received empty deviceJson"
       deviceInfos << curDeviceInfo
@@ -808,6 +803,36 @@ List extractDeviceInfos(final Map json) {
         curDeviceInfo.impulses = impulses
       }
 
+      if (deviceJson.pending) {
+        final Map curDeviceInfoPending = [:]
+
+        final Map tmpPending = deviceJson.pending
+
+        if (tmpPending.device?.v1) {
+          final Map tmpPendingDevice = tmpPending.device.v1
+
+          copyKeys(curDeviceInfoPending, tmpPendingDevice, ['sensitivity'])
+
+          // Log if some other unsupported keys are found
+          final Set otherKeys = ['sensitivity'] - tmpPendingDevice.keySet()
+          if (otherKeys) {
+            log.warn("Found unexpected pending keys: ${otherKeys}: ${JsonOutput.toJson(tmpPendingDevice)}")
+          }
+        }
+
+        if (tmpPending.command?.v1) {
+          curDeviceInfoPending.commands = []
+
+          for (final Map command in tmpPending.command.v1) {
+            curDeviceInfoPending.commands.add(command)
+          }
+        }
+
+        if (!curDeviceInfoPending.isEmpty()) {
+          curDeviceInfo.pending = curDeviceInfoPending
+        }
+      }
+
       if (deviceJson.device?.v1) {
         curDeviceInfoState << deviceJson.device.v1
       }
@@ -820,7 +845,7 @@ List extractDeviceInfos(final Map json) {
     deviceInfos.add(curDeviceInfo)
 
     if (curDeviceInfo.deviceType == null) {
-      log.warn "null device type message?: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceJson))}"
+      log.warn "null device type message?: ${JsonOutput.toJson(deviceJson)}"
     }
   }
 

@@ -85,6 +85,16 @@ void setValues(final Map deviceInfo) {
     }
   }
 
+  if (deviceInfo.pending != null) {
+    final Map deviceInfoPending = deviceInfo.pending
+
+    if (deviceInfoPending != null) {
+      if (deviceInfoPending.commands) {
+        logDebug "Device ${device.label} will set the commands ${deviceInfoPending.commands} on next wakeup"
+      }
+    }
+  }
+
   if (deviceInfo.batteryLevel != null) {
     checkChanged("battery", deviceInfo.batteryLevel, "%")
   }
