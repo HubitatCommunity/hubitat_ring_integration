@@ -680,14 +680,30 @@ List extractDeviceInfos(final Map json) {
       curDeviceInfo.zid = curDeviceInfo.assetId
       curDeviceInfo.deviceType = deviceJson.type
     } else {
+      // curDeviceInfo.state gets filled out from multiple locations, so create a dummy empty entry here
+      Map curDeviceInfoState = [:]
+
       if (deviceJson.general) {
         final Map tmpGeneral = deviceJson.general.v1 ?: deviceJson.general.v2
 
         copyKeys(curDeviceInfo, tmpGeneral, deviceJsonGeneralKeys)
       }
 
-      if (deviceJson.context || deviceJson.adapter) {
-        final Map tmpContext = deviceJson.context?.v1
+      final Map tmpContext = deviceJson.context?.v1
+
+      if (tmpContext != null) {
+        copyKeys(curDeviceInfo, tmpContext, ['batteryStatus', 'deviceName', 'roomName'])
+
+        if (tmpContext.device?.v1 != null) {
+          final Map tmpDevice = tmpContext.device.v1
+
+          if (!tmpDevice.isEmpty()) {
+            copyKeys(curDeviceInfoState, tmpDevice, ['sensitivity'])
+          }
+        }
+      }
+
+      if (tmpContext != null || deviceJson.adapter != null) {
         final Map tmpAdapter = tmpContext?.adapter?.v1 ?: deviceJson.adapter?.v1
 
         copyKeys(curDeviceInfo, tmpAdapter, ['firmwareVersion', 'signalStrength'])
@@ -696,14 +712,6 @@ List extractDeviceInfos(final Map json) {
         if (fingerprint?.firmware?.version) {
           curDeviceInfo.firmware = fingerprint.firmware.version.toString() + '.' + fingerprint.firmware.subversion.toString()
           curDeviceInfo.hardwareVersion = fingerprint.hardwareVersion?.toString()
-        }
-
-        if (tmpContext != null) {
-          copyKeys(curDeviceInfo, tmpContext, ['batteryStatus', 'deviceName', 'roomName'])
-
-          if (curDeviceInfo.deviceType == "alarm.smoke" && tmpContext.device?.v1?.alarmStatus) {
-            curDeviceInfo.state = [smoke: tmpContext.device.v1]
-          }
         }
       }
 
@@ -720,7 +728,11 @@ List extractDeviceInfos(final Map json) {
       }
 
       if (deviceJson.device?.v1) {
-        curDeviceInfo.state = deviceJson.device.v1
+        curDeviceInfoState << deviceJson.device.v1
+      }
+
+      if (!curDeviceInfoState.isEmpty()) {
+        curDeviceInfo.state = curDeviceInfoState
       }
     }
 
@@ -823,22 +835,29 @@ void sendUpdate(final Map deviceInfo) {
   logDebug "sendUpdate(deviceInfo)"
   //logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo == null || deviceInfo.deviceType == null) {
-    log.warn "No device or type"
+  if (deviceInfo == null) {
+    log.error "sendUpdate deviceInfo is null"
     return
   }
 
-  final Map mappedDeviceType = DEVICE_TYPES[deviceInfo.deviceType]
+  final String deviceType = deviceInfo.deviceType
+
+  if (deviceType == null) {
+    log.error "sendUpdate deviceInfo.deviceType is null"
+    return
+  }
+
+  final Map mappedDeviceType = DEVICE_TYPES[deviceType]
 
   if (mappedDeviceType == null) {
-    log.warn "Unsupported device type! ${deviceInfo.deviceType}"
+    log.warn "Unsupported device type! ${deviceType}"
     return
   }
 
   def d = getChildByZID(mappedDeviceType.hidden ? deviceInfo.assetId : deviceInfo.zid)
   if (!d) {
     if (!suppressMissingDeviceMessages) {
-      log.warn "Couldn't find device ${deviceInfo.name ?: deviceInfo.deviceName} of type ${deviceInfo.deviceType} with zid ${deviceInfo.zid}"
+      log.warn "Couldn't find device ${deviceInfo.name ?: deviceInfo.deviceName} of type ${deviceType} with zid ${deviceInfo.zid}"
     }
   }
   else {
@@ -853,7 +872,7 @@ void sendUpdate(final Map deviceInfo) {
       d.updateDataValue("fingerprint", deviceInfo.fingerprint ?: "N/A")
       d.updateDataValue("manufacturer", deviceInfo.manufacturerName ?: "Ring")
       d.updateDataValue("serial", deviceInfo.serialNumber ?: "N/A")
-      d.updateDataValue("type", deviceInfo.deviceType)
+      d.updateDataValue("type", deviceType)
       d.updateDataValue("src", deviceInfo.src)
     }
   }
