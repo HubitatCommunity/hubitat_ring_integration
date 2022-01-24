@@ -29,7 +29,7 @@ metadata {
     attribute "mode", "string"
     attribute "websocket", "string"
 
-    command "createDevices", []
+    command "createDevices", [[name: "zid", type: "STRING", description: "Optionally create only the device with the provided zid. Leave blank to create all devices"]]
 
     command "websocketWatchdog", []
 
@@ -119,12 +119,16 @@ def updated() {
 }
 
 /**
- * This will create all devices possible. If the user doesn't want some of them they will have to delete them manually for now.
+ * Creates device with provided zid. If no zid is provided, all devices all created
  */
 def createDevices(zid) {
   logDebug "createDevices(${zid})"
   state.createDevices = true
-  refresh(zid)
+  if (zid != null) {
+    state.createDevicesZid = zid
+  }
+
+  refresh()
 }
 
 // @note Should only be called by Ring Connect app
@@ -574,22 +578,41 @@ def parse(String description) {
       }
       else {
         final boolean isBeamsGroup = deviceInfo.deviceType == "group.light-group.beams"
+
         if (createDevices) {
-          if (!isBeamsGroup) {
-            createDevice(deviceInfo)
-          }
-          else {
-            queueCreate(deviceInfo)
+          final String formattedDNI = getFormattedDNI(deviceInfo.zid)
+
+          def d = getChildDevice(formattedDNI)
+
+          if (!d) {
+            if (isHiddenDeviceType(deviceInfo.deviceType)) {
+              logDebug "Not queuing zid ${deviceInfo.zid} for creation because the device type '${deviceInfo.deviceType}' is hidden"
+            } else {
+              if (state.createDevicesZid != null) {
+                if (state.createDevicesZid != deviceInfo.zid) {
+                  log.warn "Not queuing zid ${deviceInfo.zid} because user requested to only create zid ${state.createDevicesZid}"
+                  continue
+                }
+              }
+
+              logInfo "Queuing zid ${deviceInfo.zid} for device creation"
+              queueCreate(deviceInfo)
+            }
+          } else {
+            logDebug "Not queuing zid ${deviceInfo.zid} for device creation because it already exists"
+
+            if (!isBeamsGroup) {
+              sendUpdate(deviceInfo) // Still need to send the update info
+            }
           }
         }
-        if (!isBeamsGroup) {
+        else if (!isBeamsGroup) {
           sendUpdate(deviceInfo)
         }
       }
     }
     if (createDevices) {
       processCreateQueue()
-      state.createDevices = false
     }
   }
 }
@@ -713,25 +736,25 @@ List extractDeviceInfos(final Map json) {
   return deviceInfos
 }
 
-def createDevice(final Map deviceInfo) {
+void createDevice(final Map deviceInfo) {
   logDebug "createDevice(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
 
   final String deviceType = deviceInfo.deviceType
 
   if (deviceType == null) {
-    logDebug "Not a creatable device. ${deviceType}"
+    logDebug "Cannot create deviceType ${deviceType} because it is nul"
     return
   }
-  Map mappedDeviceType = DEVICE_TYPES[deviceType]
+  final Map mappedDeviceType = DEVICE_TYPES[deviceType]
 
   if (mappedDeviceType == null) {
-    log.warn "Unsupported device type! ${deviceType}"
+    log.warn "Cannot create a ${deviceType} device. Unsupported device type!"
     return
   }
 
   if (mappedDeviceType.hidden) {
-    logDebug "Not a creatable device. ${deviceType}"
+    logDebug "Cannot create ${deviceType} because it is a hidden type"
     return
   }
 
@@ -777,7 +800,6 @@ def createDevice(final Map deviceInfo) {
   else {
     logDebug "Device ${d} already exists. No need to create."
   }
-  return d
 }
 
 void queueCreate(final Map deviceInfo) {
@@ -788,11 +810,13 @@ void queueCreate(final Map deviceInfo) {
 }
 
 void processCreateQueue() {
-  for (it in state.queuedCreates) {
-    createDevice(it)
-    sendUpdate(it)
+  for (final Map deviceInfo in state.queuedCreates) {
+    createDevice(deviceInfo)
+    sendUpdate(deviceInfo)
   }
+  state.createDevices = false
   state.remove("queuedCreates")
+  state.remove("createDevicesZid")
 }
 
 void sendUpdate(final Map deviceInfo) {
@@ -868,6 +892,10 @@ boolean isParentRequest(type) {
 
 boolean isHub(final String kind) {
   return HUB_TYPES.contains(kind)
+}
+
+boolean isHiddenDeviceType(final String deviceType) {
+  return DEVICE_TYPES[deviceType]?.hidden == true
 }
 
 @Field final static Map DEVICE_TYPES = [
