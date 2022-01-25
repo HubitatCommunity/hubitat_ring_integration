@@ -18,15 +18,20 @@ import groovy.transform.Field
 metadata {
   definition(name: "Ring Virtual Keypad", namespace: "ring-hubitat-codahq", author: "Ben Rimmasch",
     importUrl: "https://raw.githubusercontent.com/codahq/ring_hubitat_codahq/master/src/drivers/ring-virtual-keypad.groovy") {
+    capability "Refresh"
     capability "Sensor"
     capability "Motion Sensor"
     capability "Audio Volume"
     capability "Battery"
 
     attribute "brightness", "number"
+    attribute "chirps", "enum", ["disabled", "enabled"]
     attribute "lastCheckin", "string"
+    attribute "powerSave", "enum", ["off", "on"]
 
     command "setBrightness", [[name: "Set LED Brightness*", type: "NUMBER", range: "0..100", description: "Choose a value between 0 and 100"]]
+    command "setChirps", [[name: "mode", type: "ENUM", constraints: ["disabled", "enabled"]]]
+    command "setPowerSave", [[name: "mode", type: "ENUM", constraints: ["off", "on"]]]
   }
 
   preferences {
@@ -117,6 +122,30 @@ def setBrightness(brightness) {
   parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: null, data: data])
 }
 
+def setChirps(chirps) {
+  logDebug "Attempting to set chirps to ${chirps}."
+  parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: null, data: [chirps: chirps]])
+}
+
+def setPowerSave(powerSave) {
+  String ringValue
+
+  for (it in POWER_SAVE) {
+    if (it.value == powerSave) {
+      ringValue = it.key
+      break
+    }
+  }
+
+  if (ringValue == null) {
+    log.error "Could not map ${powerSave} to value ring expects"
+    return
+  }
+
+  logDebug "Attempting to set powerSave to ${powerSave} (${ringValue})."
+  parent.simpleRequest("setdevice", [zid: device.getDataValue("zid"), dst: null, data: [powerSave: ringValue]])
+}
+
 def refresh() {
   logDebug "Attempting to refresh."
   parent.simpleRequest("refresh", [dst: device.deviceNetworkId])
@@ -138,6 +167,14 @@ void setValues(final Map deviceInfo) {
       if (keyVal != null) {
         checkChanged(key, (keyVal * 100).toInteger())
       }
+    }
+
+    if (deviceInfoState.chirps != null) {
+      checkChanged("chirps", deviceInfoState.chirps)
+    }
+
+    if (deviceInfoState.powerSave != null) {
+      checkChanged("powerSave", POWER_SAVE[deviceInfoState.powerSave])
     }
   }
 
@@ -190,3 +227,8 @@ private String convertToLocalTimeString(final Date dt) {
     return dt.toString()
   }
 }
+
+@Field final static Map<Integer, String> POWER_SAVE = [
+  'off': 'off',
+  'extended': 'on',
+]
