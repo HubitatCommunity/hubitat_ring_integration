@@ -157,12 +157,24 @@ boolean isTypePresent(kind) {
   } != null
 }
 
-def refresh(final String zid=null) {
+void refresh(final String zid=null) {
+  refreshInternal(zid, false)
+}
+
+void refreshQuiet(final String zid=null) {
+  refreshInternal(zid, true)
+}
+
+void refreshInternal(final String zid=null, boolean quiet=false) {
   logDebug "refresh(${zid})"
 
   for (final Map hub in state.hubs) {
     if (zid == null || hub.zid == zid) {
-      logInfo "Refreshing hub ${hub.zid} with kind ${hub.kind}"
+      if (quiet) {
+        logDebug "Refreshing hub ${hub.zid} with kind ${hub.kind}"
+      } else {
+        logInfo "Refreshing hub ${hub.zid} with kind ${hub.kind}"
+      }
       simpleRequest("refresh", [dst: hub.zid])
     }
   }
@@ -435,9 +447,7 @@ void initWebsocket(json) {
 
   try {
     interfaces.webSocket.connect(wsUrl)
-    logInfo "Connected!"
-    sendEvent(name: "websocket", value: "connected")
-    refresh()
+    refreshQuiet()
   }
   catch (e) {
     logDebug "initialize error: ${e.message} ${e}"

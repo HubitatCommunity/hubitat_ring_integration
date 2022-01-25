@@ -59,7 +59,6 @@ def refresh() {
 
 def on(duration = 60) {
   logDebug "Attempting to turn the light on."
-  Map data = ["lightMode": "on", "duration": duration]
   parent.simpleRequest("setcommand", [type: "light-mode.set", zid: device.getDataValue("zid"), dst: device.getDataValue("src"),
                                       data: [lightMode: "on", duration: 60]])
 }
