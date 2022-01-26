@@ -226,6 +226,9 @@ void setValues(final Map deviceInfo) {
     if (deviceInfoState.mode != null) {
       final String mappedMode = MODES.get(deviceInfoState.mode)
 
+      checkChanged("mode", mappedMode)
+      parent.childParse('mode-set', [msg: [mode: mappedMode]])
+
       if (mappedMode == "off") {
         sendEvent(name: "countdownTimeLeft", value: 0)
         sendEvent(name: "countdownTotal", value: 0)
