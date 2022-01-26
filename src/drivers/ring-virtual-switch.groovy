@@ -55,45 +55,27 @@ def off() {
 }
 
 void setValues(final Map deviceInfo) {
-  logDebug "updateDevice(deviceInfo)"
+  logDebug "setValues(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
-
-  if (deviceInfo.state != null) {
-    final Map deviceInfoState = deviceInfo.state
-
-    if (deviceInfoState.on != null) {
-      checkChanged("switch", deviceInfoState.on ? "on" : "off")
-    }
-  }
 
   if (deviceInfo.batteryLevel != null) {
     checkChanged("battery", deviceInfo.batteryLevel, "%")
   }
 
-  if (deviceInfo.tamperStatus != null) {
-    checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
-  }
-
-  if (deviceInfo.impulseType != null) {
-    final String impulseType = deviceInfo.impulseType
-    state.impulseType = impulseType
-    if (impulseType == "comm.heartbeat") {
-      sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
-    }
-  }
-
-  for(final String key in ['lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+  // Update attributes where deviceInfo key is the same as attribute name and no conversion is necessary
+  for (final String key in ["lastCheckin", "switch", "tamper"]) {
     final keyVal = deviceInfo[key]
     if (keyVal != null) {
-      state[key] = keyVal
+      checkChanged(key, keyVal)
     }
   }
 
+  // Update state values
+  state += deviceInfo.subMap(['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength'])
+
+  // Update data values
   for(final String key in ['firmware', 'hardwareVersion']) {
-    final keyVal = deviceInfo[key]
-    if (keyVal != null && device.getDataValue(key) != keyVal) {
-      device.updateDataValue(key, keyVal)
-    }
+    checkChangedDataValue(key, deviceInfo[key])
   }
 }
 
@@ -104,12 +86,8 @@ void checkChanged(final String attribute, final newStatus, final String unit=nul
   }
 }
 
-private String convertToLocalTimeString(final Date dt) {
-  final TimeZone timeZone = location?.timeZone
-  if (timeZone) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
-  }
-  else {
-    return dt.toString()
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
   }
 }

@@ -13,8 +13,6 @@
  *  for the specific language governing permissions and limitations under the License.
  */
 
-import groovy.json.JsonOutput
-
 metadata {
   definition(name: "Ring Virtual Beams Group", namespace: "ring-hubitat-codahq", author: "Ben Rimmasch",
     importUrl: "https://raw.githubusercontent.com/codahq/ring_hubitat_codahq/master/src/drivers/ring-virtual-beams-group.groovy") {
@@ -63,41 +61,33 @@ def off() {
 }
 
 void setValues(final Map deviceInfo) {
-  logDebug "updateDevice(deviceInfo)"
-  logTrace "deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
+  logDebug "setValues(deviceInfo)"
+  logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo.state != null) {
-    final Map deviceInfoState = deviceInfo.state
-
-    if (deviceInfoState.motionStatus != null) {
-      checkChanged("motion", deviceInfoState.motionStatus == "clear" ? "inactive" : "active")
-    }
-
-    if (deviceInfoState.on != null) {
-      checkChanged("switch", deviceInfoState.on ? "on" : "off")
-    }
-
-    if (deviceInfoState.groupMembers != null) {
-      Map members = [:]
-      for(groupMemeber in deviceInfoState.groupMembers) {
-        def d = parent.getChildByZID(it)
-        if (d) {
-          members[d.deviceNetworkId] = d.label
-        }
-        else {
-          log.warn "Device ${it} isn't created in Hubitat and will not be included in this group's members."
-        }
+  if (deviceInfo.groupMembers) {
+    Map members = [:]
+    for(groupMemeber in deviceInfo.groupMembers) {
+      def d = parent.getChildByZID(it)
+      if (d) {
+        members[d.deviceNetworkId] = d.label
       }
-      state.members = members
+      else {
+        log.warn "Device ${it} isn't created in Hubitat and will not be included in this group's members."
+      }
     }
+    state.members = members
   }
 
-  for(final String key in ['impulseType', 'lastCommTime', 'lastUpdate']) {
+  // Update attributes where deviceInfo key is the same as attribute name and no conversion is necessary
+  for (final String key in ["motion", "switch"]) {
     final keyVal = deviceInfo[key]
     if (keyVal != null) {
-      state[key] = keyVal
+      checkChanged(key, keyVal)
     }
   }
+
+  // Update state values
+  state += deviceInfo.subMap(['impulseType', 'lastCommTime', 'lastUpdate'])
 }
 
 boolean checkChanged(final String attribute, final newStatus, final String unit=null) {

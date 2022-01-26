@@ -217,9 +217,8 @@ private void handleRefresh(final Map msg) {
       runIn(seconds_remaining + 1, refresh)
     }
   }
-  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
-    device.updateDataValue("firmware", msg.firmware_version)
-  }
+
+  checkChangedDataValue("firmware", msg.firmware_version)
 }
 
 private void handleSet(final Map params) {
@@ -277,6 +276,12 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   }
   sendEvent(name: attribute, value: newStatus, unit: unit)
   return changed
+}
+
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
+  }
 }
 
 private String convertToLocalTimeString(final Date dt) {

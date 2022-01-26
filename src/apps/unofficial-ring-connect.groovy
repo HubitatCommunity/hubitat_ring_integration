@@ -269,7 +269,9 @@ def pollingPage() {
     section("<b><u>Configure settings to poll for motions and rings:</u></b>") {
       preferences {
         input name: "dingPolling", type: "bool", title: "Poll for motion and rings", defaultValue: false, submitOnChange: true
-        input name: "dingInterval", type: "number", range: "8..20", title: "Number of seconds in between motion/ring polls", defaultValue: 15, submitOnChange: true
+        if (dingPolling) {
+          input name: "dingInterval", type: "number", range: "8..20", title: "Number of seconds in between motion/ring polls", defaultValue: 15, submitOnChange: true
+        }
       }
     }
   }
@@ -295,7 +297,9 @@ def snapshotConfig() {
     section("<b><u>Configure Settings to Poll for Camera Thumbnail Images:</u></b>") {
       preferences {
         input name: "snapshotPolling", type: "bool", title: "Poll for camera thumbnails", defaultValue: false, submitOnChange: true
-        input name: "snapshotInterval", type: "enum", title: "Interval between thumbnail refresh", required: true, options: snapshotInvertals, defaultValue: [120]
+        if (snapshotPolling == true) {
+          input name: "snapshotInterval", type: "enum", title: "Interval between thumbnail refresh", required: true, options: snapshotInvertals, defaultValue: 120
+        }
       }
     }
   }
@@ -655,8 +659,15 @@ void processIFTTT() {
 
   logTrace "data received: kind: ${kind}, id: ${json.id}, device: ${d}, ${params}, request: ${request}, data: ${request.body}"
 
-  if (d && (kind == "motion" || kind == "ding")) {
+  if (!d) {
+    log.warn "Received processIFTTT for device ${json.id} that does not exist"
+    return
+  }
+
+  if (kind == "motion" || kind == "ding") {
     d.childParse("dings", [msg: json, type: "IFTTT"])
+  } else {
+    log.warn "Received processIFTTT for device ${json.id} with unsupported kind '${kind}'"
   }
 }
 
@@ -734,8 +745,8 @@ def addDevices() {
   apiDevice.setCreateableHubs(createableHubs)
 
   if (hubAdded) {
-    //init the websocket connection and set seq to 0. this will add the hub zids to the API device's state.  in addition it will trigger a refresh.
-    //the hubs are always created during a refresh if they do not exist.
+    // Setup websocket connection. Will trigger a refresh and add the hub zids to the API device's state.
+    // If hub devices have not been created, this will create them automatically
     apiDevice.initialize()
   }
 
@@ -901,17 +912,19 @@ void getSnapshots() {
 }
 
 def serveSnapshot() {
-  logDebug "serveSnapshot(${params.ringDeviceId})"
+  final String ringDeviceId = java.net.URLDecoder.decode(params.ringDeviceId, "UTF-8")
+
+  logDebug "serveSnapshot(${ringDeviceId})"
   logTrace "params: $params"
 
   // Get the device
-  def d = getChildDeviceInternal(params.ringDeviceId)
+  def d = getChildDeviceInternal(ringDeviceId)
   if (d == null) {
-    log.error "Could not locate a device with an id of ${params.ringDeviceId}"
+    log.error "serveSnapshot: Could not locate a device with an id of ${ringDeviceId}"
     return ["error": true, "type": "SmartAppException", "message": "Not Found"]
   }
 
-  imageResponse(state.snapshots[params.ringDeviceId]?.toArray() as byte[])
+  imageResponse(state.snapshots[ringDeviceId]?.toArray() as byte[])
 }
 
 def imageResponse(byte[] img) {
@@ -936,6 +949,7 @@ def imageResponse(byte[] img) {
   String strImg
   if (!img || img.length == 0) {
     logTrace "Default to missing image"
+    log.info "Default to missing image"
     strImg = MISSING_IMG
   }
   else {
@@ -951,10 +965,11 @@ def imageResponse(byte[] img) {
 
 @Field final static String MISSING_IMG = "data:image/png;base64,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"
 
-def snapshotOption(cam, value) {
+void snapshotOption(String cam, value) {
   if (!state.snappables) {
     state.snappables = [:]
   }
+
   state.snappables[cam] = value
 }
 
@@ -1442,7 +1457,7 @@ Map formatParams(final Map request) {
   if (query) {
     params.query = query
   }
-  logTrace "params: ${JsonOutput.prettyPrint(JsonOutput.toJson(params))}"
+  logTrace "params: ${JsonOutput.toJson(params)}"
   return params
 }
 
@@ -1551,7 +1566,7 @@ def responseHandler(response, Map params) {
       if (body.id) {
         body = [body]
       }
-      logTrace "body: ${JsonOutput.prettyPrint(JsonOutput.toJson(body))}"
+      logTrace "body: ${JsonOutput.toJson(body)}"
       body.each { deviceInfo ->
         logTrace "deviceInfo: ${deviceInfo}"
         logDebug "refreshing device ${getFormattedDNI(deviceInfo.id)}"
@@ -1599,7 +1614,7 @@ def responseHandler(response, Map params) {
     }
     else if (params.method == "dings") {
       def body = response.getJson()
-      logTrace "body: ${JsonOutput.prettyPrint(JsonOutput.toJson(body))}"
+      logTrace "body: ${JsonOutput.toJson(body)}"
       state.dingables.each { deviceId ->
         def dingInfo = body.find { it.doorbot_id.toString() == deviceId.toString() }
         if (dingInfo) {
@@ -1782,6 +1797,7 @@ boolean isOAuthEnabled() {
   "lpd_v4",
   "jbox_v1"
 ]
+
 
 @Field static Map DEVICE_TYPES = [
   "WS_API_DNI": [name: "Ring API Virtual Device", driver: "Ring API Virtual Device", dingable: false],

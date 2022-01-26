@@ -385,9 +385,9 @@ private List getRequests(final String type, final Map parts) {
 
   return ["message", msg]
 
-    //future functionality maybe
-    //test mode motion detctr 42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","command":{"v1":[{"commandType":"detection-test-mode.start","data":{}}]}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":9}]
-    //cancel test above       42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","command":{"v1":[{"commandType":"detection-test-mode.cancel","data":{}}]}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":10}]
+  //future functionality maybe
+  //test mode motion detctr 42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","command":{"v1":[{"commandType":"detection-test-mode.start","data":{}}]}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":9}]
+  //cancel test above       42["message",{"body":[{"zid":"[MOTION_SENSOR_ZID]","command":{"v1":[{"commandType":"detection-test-mode.cancel","data":{}}]}}],"datatype":"DeviceInfoSetType","dst":null,"msg":"DeviceInfoSet","seq":10}]
 }
 
 void sendMsg(final String s) {
@@ -496,7 +496,7 @@ def parse(String description) {
     def json = new JsonSlurper().parseText(msg)
     //logTrace "json: $json"
 
-    List deviceInfos
+   boolean gotDeviceInfoDocType = false
 
     if (json[0] == "DataUpdate") {
       final String msgtype = json[1].msg
@@ -506,80 +506,89 @@ def parse(String description) {
 
       if (msgtype == "DataUpdate") {
         if (datatype == "DeviceInfoDocType") {
-          runExtractDeviceInfos = true
-        } else if (datatype == "SystemStatusType") {
+          gotDeviceInfoDocType = true
+        }
+        else if (datatype == "HubDisconnectionEventType") {
+          // Appears to be sent when hub is offline
+        }
+        else if (datatype == "SystemStatusType") {
           for (final Map systemStatus in json[1].body) {
             final String statusString = systemStatus.statusString
 
             if (statusString == "device.find.configuring.begin") {
               logDebug "Ring Alarm hub is starting to configure a new device"
-
-            } else if (statusString == "device.find.configuring.finished") {
+            }
+            else if (statusString == "device.find.configuring.finished") {
               log.warn("Ring Alarm hub has finished configuring a new device. To add this device to hubitat, run 'createDevices' in the 'Ring API Virtual Device'")
-
-            } else if (statusString == "device.find.listening") {
+            }
+            else if (statusString == "device.find.listening") {
               logDebug "Ring Alarm hub is listening for new devices"
-
-            } else if (statusString == "device.find.initialize") {
+            }
+            else if (statusString == "device.find.initialize") {
               logDebug "Ring Alarm hub is getting ready to initialize a new device"
-
-            } else if (statusString.startsWith("device.find.error")) {
+            }
+            else if (statusString.startsWith("device.find.error")) {
               logDebug "Ring alarm hub encountered a ${statusString} error while configuring a new device"
-
-            } else if (statusString == "device.remove.initialize") {
+            }
+            else if (statusString == "device.remove.initialize") {
               logDebug "Ring Alarm hub is getting ready to remove a device"
-
-            } else if (statusString == "device.remove.listening") {
+            }
+            else if (statusString == "device.remove.listening") {
               logDebug "Ring Alarm hub is listening for a device to remove"
-
-            } else if (statusString == "device.remove.done") {
+            }
+            else if (statusString == "device.remove.done") {
               logDebug "Ring Alarm hub finished removing a device"
-
-            } else if (statusString.startsWith("device.remove.error")) {
+            }
+            else if (statusString.startsWith("device.remove.error")) {
               logDebug "Ring alarm hub encountered a ${statusString} error while removing a new device"
-
-            } else {
+            }
+            else {
               log.warn ("Got an unsupported DataUpdate.SystemStatusType: ${JsonOutput.toJson(systemStatus)}")
             }
           }
-        } else {
-          log.warn "Received unsupported ${msgtype} datatype ${datatype}"
+        }
+        else if (datatype == "DeviceAddDocType" || datatype == "RemovedDeviceType") {
+          log.warn ("Got a ${datatype}!! Save this as an example!!!")
           log.warn description
         }
-      } else if (msgtype == "Passthru") {
+        else {
+          log.warn "Received unsupported ${msgtype} datatype ${datatype}. Please report this to the developers so support can be added."
+          log.warn description
+        }
+      }
+      else if (msgtype == "Passthru") {
         if (datatype == "PassthruType") {
-          runExtractDeviceInfos = true
+          // Only create device infos for hubs devices that were selected in the app
+          if (getCreateableHubs().contains(json[1].context.assetKind)) {
+            for (final Map deviceInfo in extractDeviceInfos(json[1])) {
+              logTrace "created deviceInfo: ${JsonOutput.toJson(deviceInfo)}"
+              sendPassthru(deviceInfo)
+            }
+          }
         } else {
-          log.warn "Received unsupported ${msgtype} datatype ${datatype}"
+          log.warn "Received unsupported ${msgtype} datatype ${datatype}. Please report this to the developers so support can be added."
           log.warn description
         }
-      } else if (msgtype == "SessionInfo") {
+      }
+      else if (msgtype == "SessionInfo") {
         if (datatype == "SessionInfoType") {
           // Ignored
         } else {
-          log.warn "Received unsupported ${msgtype} datatype ${datatype}"
+          log.warn "Received unsupported ${msgtype} datatype ${datatype}. Please report this to the developers so support can be added."
           log.warn description
         }
-      } else if (msgtype == "SubscriptionTopicsInfo") {
+      }
+      else if (msgtype == "SubscriptionTopicsInfo") {
         if (datatype == "SubscriptionTopicType") {
           // Ignored
         } else {
-          log.warn "Received unsupported ${msgtype} datatype ${datatype}"
+          log.warn "Received unsupported ${msgtype} datatype ${datatype}. Please report this to the developers so support can be added."
           log.warn description
         }
-      } else {
+      }
+      else {
         log.warn "Received unsupported ${msgtype}"
         log.warn description
-      }
-
-      if (runExtractDeviceInfos) {
-        // Only create device infos for devices that were selected in the app
-        if (getCreateableHubs().contains(json[1].context.assetKind)) {
-          deviceInfos = extractDeviceInfos(json[1])
-        }
-        //else {
-        //  logTrace "Discarded update from hub ${json[1].context.assetKind}"
-        //}
       }
     }
     else if (json[0] == "message") {
@@ -587,50 +596,33 @@ def parse(String description) {
 
       if (msgtype == "DeviceInfoDocGetList") {
         if (json[1].datatype == "DeviceInfoDocType") {
-          final String assetKind = json[1].context.assetKind
-          final String assetId = json[1].context.assetId
-
-          // Only create device infos for devices that were selected in the app
-          if (getCreateableHubs().contains(assetKind)) {
-            deviceInfos = extractDeviceInfos(json[1])
-            // If the hub for these device infos doesn't exist then create it
-            if (!getChildByZID(assetId)) {
-              createDevice([deviceType: assetKind, zid: assetId, src: json[1].src])
-              //might as well create the devices
-              state.createDevices = true
-            }
-          }
-          //else {
-          //  logTrace "Discarded device list from hub ${json[1].context.assetKind}"
-          //}
+          gotDeviceInfoDocType = true
         } else if (json[1].context?.uiConnection != null) {
           logDebug "Received weird DeviceInfoDocGetList with no datatype. Ignoring"
           logTrace description
         } else {
-          log.warn "Received unsupported DeviceInfoDocGetList"
+          log.warn "Received unsupported DeviceInfoDocGetList. Please report this to the developers so support can be added."
           log.warn description
         }
       }
       else if (msgtype == "DeviceInfoSet") {
         if (json[1].status == 0) {
           logTrace "DeviceInfoSet with seq ${json[1].seq} succeeded."
-        }
-        else {
-          log.warn "I think a DeviceInfoSet failed?"
+        } else {
+          log.warn "I think a DeviceInfoSet failed? Please report this to the developers so support can be added."
           log.warn description
         }
       }
       else if (msgtype == "SetKeychainValue") {
         if (json[1].status == 0) {
           logTrace "SetKeychainValue with seq ${json[1].seq} succeeded."
-        }
-        else {
-          log.warn "I think a SetKeychainValue failed?"
+        } else {
+          log.warn "I think a SetKeychainValue failed? Please report this to the developers so support can be added."
           log.warn description
         }
       }
       else {
-        log.warn "Received unsupported json[1].msg: ${msgtype}"
+        log.warn "Received unsupported json[1].msg: ${msgtype}. Please report this to the developers so support can be added."
         log.warn description
       }
     }
@@ -639,162 +631,181 @@ def parse(String description) {
       interfaces.webSocket.close()
       sendEvent(name: "websocket", value: "disconnect")
       //It appears we don't disconnect fast enough because we still get a failure from the status method when we close.  Because
-      //of that failure message and reconnect there we do not need to reconnect here.  Commenting out for now.
-      //reconnectWebSocket()
+      //of that failure message and reconnect there we do not need to reconnect here.
     }
     else {
-      log.warn "Received unsupported json[0] ${json[0]}"
+      log.warn "Received unsupported json[0] ${json[0]}. Please report this to the developers so support can be added."
       log.warn description
     }
 
-    final boolean createDevices = state.createDevices
+    if (gotDeviceInfoDocType) {
+      final String assetKind = json[1].context.assetKind
+      final String assetId = json[1].context.assetId
 
-    for (final Map deviceInfo in deviceInfos) {
-      logTrace "created deviceInfo: ${JsonOutput.toJson(deviceInfo)}"
+      // Only create device infos for hubs  that were selected in the app
+      if (getCreateableHubs().contains(assetKind)) {
+        List<Map> deviceInfos = extractDeviceInfos(json[1])
+        // If the hub for these device infos doesn't exist then create it
+        if (!getChildByZID(assetId)) {
+          createDevice([deviceType: assetKind, zid: assetId, src: json[1].src])
+          // If the hub was just created, create the rest of the devices too
+          state.createDevices = true
+        }
 
-      if (deviceInfo.msg == "Passthru") {
-        sendPassthru(deviceInfo)
-      }
-      else {
-        final boolean isBeamsGroup = deviceInfo.deviceType == "group.light-group.beams"
+        final boolean createDevices = state.createDevices
 
-        if (createDevices) {
-          final String formattedDNI = getFormattedDNI(deviceInfo.zid)
+        for (final Map deviceInfo in deviceInfos) {
+          final boolean isBeamsGroup = deviceInfo.deviceType == "group.light-group.beams"
 
-          def d = getChildDevice(formattedDNI)
+          if (createDevices) {
+            def d = getChildByZID(deviceInfo.zid)
 
-          if (!d) {
-            if (isHiddenDeviceType(deviceInfo.deviceType)) {
-              logDebug "Not queuing zid ${deviceInfo.zid} for creation because the device type '${deviceInfo.deviceType}' is hidden"
-            } else {
-              if (state.createDevicesZid != null) {
-                if (state.createDevicesZid != deviceInfo.zid) {
+            if (!d) {
+              if (isHiddenDeviceType(deviceInfo.deviceType)) {
+                  logDebug "Not queuing zid ${deviceInfo.zid} for creation because the device type '${deviceInfo.deviceType}' is hidden"
+              } else {
+                final String createDevicesZid = state.createDevicesZid
+                if (createDevicesZid != null && createDevicesZid != deviceInfo.zid) {
                   log.warn "Not queuing zid ${deviceInfo.zid} because user requested to only create zid ${state.createDevicesZid}"
                   continue
                 }
+
+                logInfo "Queuing zid ${deviceInfo.zid} for device creation"
+                  queueCreate(deviceInfo)
               }
-
-              logInfo "Queuing zid ${deviceInfo.zid} for device creation"
-              queueCreate(deviceInfo)
-            }
-          } else {
-            logDebug "Not queuing zid ${deviceInfo.zid} for device creation because it already exists"
-
-            if (!isBeamsGroup) {
-              sendUpdate(deviceInfo) // Still need to send the update info
+              continue
+            } else {
+              logDebug "Not queuing zid ${deviceInfo.zid} for device creation because it already exists"
             }
           }
+
+          if (!isBeamsGroup) {
+            sendUpdate(deviceInfo)
+          }
         }
-        else if (!isBeamsGroup) {
-          sendUpdate(deviceInfo)
+        if (createDevices) {
+          processCreateQueue()
         }
       }
     }
-    if (createDevices) {
-      processCreateQueue()
-    }
   }
 }
 
-private void copyKeys(Map target, final Map source, final keys) {
-  copyKeys(target, source, keys.toSet())
-}
+@Field final static List<String> deviceJsonGeneralKeys = ['acStatus', 'batteryLevel', 'batteryStatus', 'componentDevices', 'deviceType',
+                                                          'manufacturerName', 'nextExpectedWakeup', 'zid']
 
-private void copyKeys(Map target, final Map source, final Set<String> keys) {
-  for (final entry in source) {
-    final String name = entry.key
+@Field final static List<String> deviceJsonDeviceKeys = ['batteryBackup', 'chirps', 'co', 'faulted', 'flood', 'freeze', 'groupMembers',
+                                                         'locked', 'mode', 'networks', 'powerSave', 'sensitivity', 'status', 'smoke',
+                                                         'testMode', 'version']
 
-    if (name in keys) {
-      target[name] = entry.value
-    }
-  }
-}
-
-@Field final static HashSet<String> contextKeys = ['affectedEntityType', 'affectedEntityId', 'affectedEntityName', 'assetId', 'eventLevel']
-
-@Field final static HashSet<String> deviceJsonGeneralKeys = ['acStatus', 'adapterType', 'batteryLevel', 'batteryStatus', 'componentDevices',
-                                                             'deviceType', 'fingerprint', 'lastUpdate', 'lastCommTime', 'manufacturerName',
-                                                             'name', 'nextExpectedWakeup', 'roomId', 'serialNumber', 'tamperStatus', 'zid']
-
-List extractDeviceInfos(final Map json) {
+List<Map> extractDeviceInfos(final Map json) {
   logDebug "extractDeviceInfos(json)"
   //logTrace "json: ${JsonOutput.toJson(json)}"
 
   final String msg = json.msg
 
-  if (msg != "DataUpdate" && msg != "DeviceInfoDocGetList") {
-    logTrace "msg type: ${msg}"
-    logTrace "json: ${JsonOutput.toJson(json)}"
-  }
-
-  List deviceInfos = []
+  List<Map> deviceInfos = []
 
   Map defaultDeviceInfo = [
+    // @todo Figure out if this is needed
     src: json.src,
-    msg: msg,
   ]
 
   if (json.context) {
-    copyKeys(defaultDeviceInfo, json.context, contextKeys)
+    defaultDeviceInfo << json.context.subMap(['assetId'])
   }
+
+  // @todo Experiment with commStatus. "error" == "offline"
+
+  final String lastCheckin = convertToLocalTimeString(new Date())
 
   //iterate each device
   for (final Map deviceJson in json.body) {
     Map curDeviceInfo = defaultDeviceInfo.clone()
 
     //logTrace "now deviceJson: ${JsonOutput.toJson(deviceJson)}"
-    if (!deviceJson) {
-      log.warn "Received empty deviceJson"
-      deviceInfos << curDeviceInfo
+    if (deviceJson.isEmpty()) {
+      log.error "Received empty deviceJson"
+      deviceInfos.add(curDeviceInfo)
       continue
     }
 
     // Likely a passthru
-    if (deviceJson.data) {
-      assert curDeviceInfo.msg == 'Passthru'
-      curDeviceInfo.state = deviceJson.data
+    if (msg == 'Passthru') {
+      curDeviceInfo.state = deviceJson.data.subMap(['percent', 'timeLeft', 'total', 'transition'])
       curDeviceInfo.zid = curDeviceInfo.assetId
       curDeviceInfo.deviceType = deviceJson.type
     } else {
       // curDeviceInfo.state gets filled out from multiple locations, so create a dummy empty entry here
       Map curDeviceInfoState = [:]
 
+      String deviceType
+
       if (deviceJson.general) {
         final Map tmpGeneral = deviceJson.general.v1 ?: deviceJson.general.v2
 
-        copyKeys(curDeviceInfo, tmpGeneral, deviceJsonGeneralKeys)
-      }
+        if (tmpGeneral) {
+          curDeviceInfo << tmpGeneral.subMap(deviceJsonGeneralKeys)
 
-      final Map tmpContext = deviceJson.context?.v1
+          deviceType = curDeviceInfo.deviceType
 
-      if (tmpContext != null) {
-        copyKeys(curDeviceInfo, tmpContext, ['batteryStatus', 'deviceName', 'roomName'])
+          List<String> list1 = ['adapter.zigbee', 'adapter.zwave', 'access-code', 'access-code.vault', 'security-panel']
+          if (!list1.contains(deviceType)) {
+            curDeviceInfo << tmpGeneral.subMap(['commStatus', 'fingerprint', 'lastCommTime', 'lastUpdate', 'name', 'serialNumber'])
 
-        if (tmpContext.device?.v1 != null) {
-          final Map tmpDevice = tmpContext.device.v1
-
-          if (!tmpDevice.isEmpty()) {
-            copyKeys(curDeviceInfoState, tmpDevice, ['sensitivity'])
+            final tamperStatus = tmpGeneral.tamperStatus
+            if (tamperStatus != null) {
+              curDeviceInfo.tamper = tamperStatus == "tamper" ? "detected" : "clear"
+            }
           }
         }
       }
 
-      if (tmpContext != null || deviceJson.adapter != null) {
+      final Map tmpContext = deviceJson.context?.v1
+
+      if (tmpContext) {
+        curDeviceInfo << tmpContext.subMap(['batteryStatus', 'deviceName'])
+
+        if (tmpContext.device?.v1) {
+          final Map deviceV1 = tmpContext.device.v1
+
+          // alarmInfo and transitionDelayEndTimestamp are inconsistently duplicated in deviceJson.device.v1
+          curDeviceInfo << deviceV1.subMap(['alarmInfo', 'siren', 'transitionDelayEndTimestamp'])
+        }
+      }
+
+      if (tmpContext || deviceJson.adapter) {
         final Map tmpAdapter = tmpContext?.adapter?.v1 ?: deviceJson.adapter?.v1
 
-        copyKeys(curDeviceInfo, tmpAdapter, ['firmwareVersion', 'signalStrength'])
+        if (tmpAdapter) {
+          curDeviceInfo << tmpAdapter.subMap(['firmwareVersion', 'signalStrength'])
 
-        final Map fingerprint = tmpAdapter?.fingerprint
-        if (fingerprint?.firmware?.version) {
-          curDeviceInfo.firmware = fingerprint.firmware.version.toString() + '.' + fingerprint.firmware.subversion.toString()
-          curDeviceInfo.hardwareVersion = fingerprint.hardwareVersion?.toString()
+          // @todo Would like to confirm that 'firmwareVersion' is still a thing
+          if (curDeviceInfo.firmwareVersion) {
+            log.warn ("Has firmwareVersion! ${deviceJson}")
+          }
+
+          // 'access-code' device types publish a firmware and hardwareVersion. There's no reason to use that value
+          if (deviceType != 'access-code') {
+            final Map fingerprint = tmpAdapter?.fingerprint
+            if (fingerprint?.firmware?.version) {
+              curDeviceInfo.firmware = fingerprint.firmware.version.toString() + '.' + fingerprint.firmware.subversion.toString()
+              curDeviceInfo.hardwareVersion = fingerprint.hardwareVersion?.toString()
+            }
+          }
         }
       }
 
       if (deviceJson.impulse?.v1) {
         final List tmpImpulses = deviceJson.impulse.v1
 
-        curDeviceInfo.impulseType = tmpImpulses[0].impulseType
+        final String impulseType = tmpImpulses[0].impulseType
+
+        curDeviceInfo.impulseType = impulseType
+
+        if (impulseType == "comm.heartbeat") {
+          curDeviceInfo.lastCheckin = lastCheckin
+        }
 
         Map impulses = [:]
         for (final Map impulse in tmpImpulses) {
@@ -811,7 +822,7 @@ List extractDeviceInfos(final Map json) {
         if (tmpPending.device?.v1) {
           final Map tmpPendingDevice = tmpPending.device.v1
 
-          copyKeys(curDeviceInfoPending, tmpPendingDevice, ['sensitivity'])
+          curDeviceInfoPending << tmpPendingDevice.subMap(['sensitivity'])
 
           // Log if some other unsupported keys are found
           final Set otherKeys = ['sensitivity'] - tmpPendingDevice.keySet()
@@ -834,11 +845,34 @@ List extractDeviceInfos(final Map json) {
       }
 
       if (deviceJson.device?.v1) {
-        curDeviceInfoState << deviceJson.device.v1
-      }
+        final Map deviceV1 = deviceJson.device.v1
 
-      if (!curDeviceInfoState.isEmpty()) {
-        curDeviceInfo.state = curDeviceInfoState
+        // I have at least one example where these keys is set to null in deviceJson.device.v1., but wasn't set in deviceJson.context.v1.device.v1.
+        // Make sure to copy it here
+        for (final String key in ['alarmInfo', 'transitionDelayEndTimestamp']) {
+          if (!curDeviceInfo.containsKey(key) && deviceV1.containsKey(key)) {
+            curDeviceInfo[key] = deviceV1[key]
+          }
+        }
+
+        curDeviceInfo << deviceV1.subMap(deviceJsonDeviceKeys)
+
+        for (final String key in ['brightness', 'level', 'volume']) {
+          final keyVal = deviceV1.get(key)
+          if (keyVal != null) {
+            curDeviceInfo[key] = (keyVal * 100).toInteger()
+          }
+        }
+
+        final motionStatus = deviceV1.motionStatus
+        if (motionStatus != null) {
+          curDeviceInfo.motion = motionStatus == "clear" ? "inactive" : "active"
+        }
+
+        final on = deviceV1.on
+        if (on != null) {
+          curDeviceInfo.switch = on ? "on" : "off"
+        }
       }
     }
 
@@ -861,17 +895,18 @@ void createDevice(final Map deviceInfo) {
   final String deviceType = deviceInfo.deviceType
 
   if (deviceType == null) {
-    logDebug "Cannot create deviceType ${deviceType} because it is nul"
+    logDebug "Cannot create deviceType ${deviceType} because it is null"
     return
   }
-  final Map mappedDeviceType = DEVICE_TYPES[deviceType]
 
-  if (mappedDeviceType == null) {
+  final String mappedDeviceTypeName = DEVICE_TYPE_NAMES[deviceType]
+
+  if (mappedDeviceTypeName == null) {
     log.warn "Cannot create a ${deviceType} device. Unsupported device type!"
     return
   }
 
-  if (mappedDeviceType.hidden) {
+  if (isHiddenDeviceType(deviceType)) {
     logDebug "Cannot create ${deviceType} because it is a hidden type"
     return
   }
@@ -891,24 +926,19 @@ void createDevice(final Map deviceInfo) {
   def d = getChildDevice(formattedDNI)
   if (!d) {
     // Devices that have drivers that store in devices
-    log.warn "Creating a ${mappedDeviceType.name} (${deviceType}) with dni: ${formattedDNI}"
+    log.warn "Creating a ${mappedDeviceTypeName} (${deviceType}) with dni: ${formattedDNI}"
     try {
-      d = addChildDevice("ring-hubitat-codahq", mappedDeviceType.name, formattedDNI, data)
-      d.label = deviceInfo.name ?: mappedDeviceType.name
+      d = addChildDevice("ring-hubitat-codahq", mappedDeviceTypeName, formattedDNI,
+                         [label: deviceInfo.name ?: mappedDeviceTypeName])
 
-      d.updateDataValue("zid",  deviceInfo.zid)
-      d.updateDataValue("fingerprint", deviceInfo.fingerprint ?: "N/A")
-      d.updateDataValue("manufacturer", deviceInfo.manufacturerName ?: "Ring")
-      d.updateDataValue("serial", deviceInfo.serialNumber ?: "N/A")
-      d.updateDataValue("type", deviceType)
-      d.updateDataValue("src", deviceInfo.src)
+      setInitialDeviceDataValues(d, deviceInfo)
 
       log.warn "Successfully added ${deviceType} with dni: ${formattedDNI}"
     }
     catch (e) {
-      if (e.toString().replace(mappedDeviceType.name, "") ==
+      if (e.toString().replace(mappedDeviceTypeName, "") ==
         "com.hubitat.app.exception.UnknownDeviceTypeException: Device type '' in namespace 'ring-hubitat-codahq' not found") {
-        log.error '<b style="color: red;">The "' + mappedDeviceType.name + '" driver was not found and needs to be installed.</b>\r\n'
+        log.error '<b style="color: red;">The "' + mappedDeviceTypeName + '" driver was not found and needs to be installed.</b>\r\n'
       }
       else {
         log.error "Error adding device: ${e}"
@@ -918,6 +948,15 @@ void createDevice(final Map deviceInfo) {
   else {
     logDebug "Device ${d} already exists. No need to create."
   }
+}
+
+void setInitialDeviceDataValues(d, final Map deviceInfo) {
+  d.updateDataValue("zid",  deviceInfo.zid)
+  d.updateDataValue("fingerprint", deviceInfo.fingerprint ?: "N/A")
+  d.updateDataValue("manufacturer", deviceInfo.manufacturerName ?: "Ring")
+  d.updateDataValue("serial", deviceInfo.serialNumber ?: "N/A")
+  d.updateDataValue("type", deviceInfo.deviceType)
+  d.updateDataValue("src", deviceInfo.src)
 }
 
 void queueCreate(final Map deviceInfo) {
@@ -953,17 +992,10 @@ void sendUpdate(final Map deviceInfo) {
     return
   }
 
-  final Map mappedDeviceType = DEVICE_TYPES[deviceType]
-
-  if (mappedDeviceType == null) {
-    log.warn "Unsupported device type! ${deviceType}"
-    return
-  }
-
-  def d = getChildByZID(mappedDeviceType.hidden ? deviceInfo.assetId : deviceInfo.zid)
+  def d = getChildByZID(isHiddenDeviceType(deviceType) ? deviceInfo.assetId : deviceInfo.zid)
   if (!d) {
     if (!suppressMissingDeviceMessages) {
-      log.warn "Couldn't find device ${deviceInfo.name ?: deviceInfo.deviceName} of type ${deviceType} with zid ${deviceInfo.zid}"
+      log.warn "Couldn't find device ${deviceInfo.name ?: deviceInfo.deviceName} of type ${deviceType} with zid ${deviceInfo.zid} (Run createDevice() to create missing devices)"
     }
   }
   else {
@@ -973,13 +1005,16 @@ void sendUpdate(final Map deviceInfo) {
     // Old versions set device data fields incorrectly. Hubitat v2.2.4 appears to clean up
     // the bad data fields. Reproduce the necessary fields
     if (d.getDataValue('zid') == null) {
-      log.warn "Device ${d} is missing 'zid' data field. Attempting to fix"
-      d.updateDataValue("zid",  deviceInfo.zid)
-      d.updateDataValue("fingerprint", deviceInfo.fingerprint ?: "N/A")
-      d.updateDataValue("manufacturer", deviceInfo.manufacturerName ?: "Ring")
-      d.updateDataValue("serial", deviceInfo.serialNumber ?: "N/A")
-      d.updateDataValue("type", deviceType)
-      d.updateDataValue("src", deviceInfo.src)
+      if (!['adapter.zigbee', 'adapter.zwave', 'access-code', 'access-code.vault', 'security-panel'].contains(deviceType)) {
+        log.warn "Device ${d} is missing 'zid' data field. Attempting to fix"
+        setInitialDeviceDataValues(d, deviceInfo)
+      }
+    } else if (deviceType ==  'hub.redsky' || deviceType == 'hub.kili') {
+      // The fix above was applied to the hub.* datatypes with incorrect values. Check for a mismatch and update as necessary
+      if (d.getDataValue('type') != deviceType) {
+        log.warn "Device ${d} has incorrect 'type' data field '${d.getDataValue('type')}. Attempting to fix"
+        setInitialDeviceDataValues(d, deviceInfo)
+      }
     }
   }
 }
@@ -997,6 +1032,16 @@ void sendPassthru(final Map deviceInfo) {
   else {
     logDebug "Passthru for device ${d}"
     d.setValues(deviceInfo)
+  }
+}
+
+private String convertToLocalTimeString(final Date dt) {
+  final TimeZone timeZone = location?.timeZone
+  if (timeZone) {
+    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
+  }
+  else {
+    return dt.toString()
   }
 }
 
@@ -1020,44 +1065,55 @@ boolean isHub(final String kind) {
 }
 
 boolean isHiddenDeviceType(final String deviceType) {
-  return DEVICE_TYPES[deviceType]?.hidden == true
+  return HIDDEN_DEVICES.contains(deviceType)
 }
 
-@Field final static Map DEVICE_TYPES = [
+@Field final static Map<String, String> DEVICE_TYPE_NAMES = [
   //physical alarm devices
-  "sensor.contact": [name: "Ring Virtual Contact Sensor", hidden: false],
-  "sensor.tilt": [name: "Ring Virtual Contact Sensor", hidden: false],
-  "sensor.zone": [name: "Ring Virtual Contact Sensor", hidden: false],
-  "sensor.motion": [name: "Ring Virtual Motion Sensor", hidden: false],
-  "sensor.flood-freeze": [name: "Ring Virtual Alarm Flood & Freeze Sensor", hidden: false],
-  "listener.smoke-co": [name: "Ring Virtual Alarm Smoke & CO Listener", hidden: false],
-  "alarm.co": [name: "Ring Virtual CO Alarm", hidden: false],
-  "alarm.smoke": [name: "Ring Virtual Smoke Alarm", hidden: false],
-  "range-extender.zwave": [name: "Ring Virtual Alarm Range Extender", hidden: false],
-  "lock": [name: "Ring Virtual Lock", hidden: false],
-  "security-keypad": [name: "Ring Virtual Keypad", hidden: false],
-  "security-panic": [name: "Ring Virtual Panic Button", hidden: false],
-  "base_station_k1": [name: "Ring Virtual Alarm Hub Pro", hidden: false],
-  "base_station_v1": [name: "Ring Virtual Alarm Hub", hidden: false],
-  "siren": [name: "Ring Virtual Siren", hidden: false],
-  "siren.outdoor-strobe": [name: "Ring Virtual Siren", hidden: false],
-  "switch": [name: "Ring Virtual Switch", hidden: false],
-  "bridge.flatline": [name: "Ring Virtual Retrofit Alarm Kit", hidden: false],
+  "sensor.contact": "Ring Virtual Contact Sensor",
+  "sensor.tilt": "Ring Virtual Contact Sensor",
+  "sensor.zone": "Ring Virtual Contact Sensor",
+  "sensor.motion": "Ring Virtual Motion Sensor",
+  "sensor.flood-freeze": "Ring Virtual Alarm Flood & Freeze Sensor",
+  "listener.smoke-co": "Ring Virtual Alarm Smoke & CO Listener",
+  "alarm.co": "Ring Virtual CO Alarm",
+  "alarm.smoke": "Ring Virtual Smoke Alarm",
+  "range-extender.zwave": "Ring Virtual Alarm Range Extender",
+  "lock": "Ring Virtual Lock",
+  "security-keypad": "Ring Virtual Keypad",
+  "security-panic": "Ring Virtual Panic Button",
+  "base_station_k1": "Ring Virtual Alarm Hub Pro",
+  "base_station_v1": "Ring Virtual Alarm Hub",
+  "siren": "Ring Virtual Siren",
+  "siren.outdoor-strobe": "Ring Virtual Siren",
+  "switch": "Ring Virtual Switch",
+  "bridge.flatline": "Ring Virtual Retrofit Alarm Kit",
   //virtual alarm devices
-  "adapter.zwave": [name: "Ring Z-Wave Adapter", hidden: true],
-  "adapter.zigbee": [name: "Ring Zigbee Adapter", hidden: true],
-  "security-panel": [name: "Ring Alarm Security Panel", hidden: true],
-  "hub.redsky": [name: "Ring Alarm Base Station", hidden: true],
-  "hub.kili": [name: "Ring Alarm Pro Base Station", hidden: true],
-  "access-code.vault": [name: "Code Vault", hidden: true],
-  "access-code": [name: "Access Code", hidden: true],
+  "adapter.zwave": "Ring Z-Wave Adapter",
+  "adapter.zigbee": "Ring Zigbee Adapter",
+  "security-panel": "Ring Alarm Security Panel",
+  "hub.redsky": "Ring Alarm Base Station",
+  "hub.kili": "Ring Alarm Pro Base Station",
+  "access-code.vault": "Code Vault",
+  "access-code": "Access Code",
   //physical beams devices
-  "switch.multilevel.beams": [name: "Ring Virtual Beams Light", hidden: false],
-  "motion-sensor.beams": [name: "Ring Virtual Beams Motion Sensor", hidden: false],
-  "group.light-group.beams": [name: "Ring Virtual Beams Group", hidden: false],
-  "beams_bridge_v1": [name: "Ring Virtual Beams Bridge", hidden: false],
+  "switch.multilevel.beams": "Ring Virtual Beams Light",
+  "motion-sensor.beams": "Ring Virtual Beams Motion Sensor",
+  "group.light-group.beams": "Ring Virtual Beams Group",
+  "beams_bridge_v1": "Ring Virtual Beams Bridge",
   //virtual beams devices
-  "adapter.ringnet": [name: "Ring Beams Ringnet Adapter", hidden: true]
+  "adapter.ringnet": "Ring Beams Ringnet Adapter"
+]
+
+@Field final static HashSet<String> HIDDEN_DEVICES = [
+  "access-code.vault",
+  "access-code",
+  "adapter.ringnet",
+  "adapter.zigbee",
+  "adapter.zwave",
+  "security-panel",
+  "hub.kili",
+  "hub.redsky",
 ]
 
 @Field final static HashSet<String> HUB_TYPES = [

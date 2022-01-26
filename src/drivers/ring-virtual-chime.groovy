@@ -237,13 +237,8 @@ private void handleRefresh(final Map msg) {
     logInfo "No previous volume found so arbitrary value given"
   }
 
-  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
-    device.updateDataValue("firmware", msg.firmware_version)
-  }
-  if (msg.kind && device.getDataValue("kind") != msg.kind) {
-    device.updateDataValue("kind", msg.kind)
-  }
-
+  checkChangedDataValue("firmware", msg.firmware_version)
+  checkChangedDataValue("kind", msg.kind)
 }
 
 private boolean isMuted() {
@@ -257,4 +252,10 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   }
   sendEvent(name: attribute, value: newStatus, unit: unit)
   return changed
+}
+
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
+  }
 }

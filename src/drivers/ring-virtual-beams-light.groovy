@@ -13,7 +13,6 @@
  *  for the specific language governing permissions and limitations under the License.
  */
 
-import groovy.json.JsonOutput
 import groovy.transform.Field
 
 metadata {
@@ -80,25 +79,11 @@ def setBrightness(brightness) {
 }
 
 void setValues(final Map deviceInfo) {
-  logDebug "updateDevice(deviceInfo)"
-  logTrace "deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
+  logDebug "setValues(deviceInfo)"
+  logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo.state != null) {
-    final Map deviceInfoState = deviceInfo.state
-
-    if (deviceInfoState.motionStatus != null) {
-      checkChanged("motion", deviceInfoState.motionStatus == "clear" ? "inactive" : "active")
-    }
-
-    if (deviceInfoState.on != null) {
-      checkChanged("switch", deviceInfoState.on ? "on" : "off")
-    }
-
-    if (deviceInfoState.level != null) {
-      if (!NO_BRIGHTNESS_DEVICES.contains(device.getDataValue("fingerprint"))) {
-        checkChanged("brightness", (deviceInfoState.level.toDouble() * 100).toInteger())
-      }
-    }
+  if (deviceInfo.level != null && !NO_BRIGHTNESS_DEVICES.contains(device.getDataValue("fingerprint"))) {
+    checkChanged("brightness", deviceInfo.level)
   }
 
   if (deviceInfo.batteryLevel != null) {
@@ -107,26 +92,24 @@ void setValues(final Map deviceInfo) {
     }
   }
 
-  if (deviceInfo.tamperStatus != null) {
-    checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
-  }
-
   if (deviceInfo.lastUpdate != null && deviceInfo.lastUpdate != state.lastUpdate) {
     sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
   }
 
-  for(final String key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+  // Update attributes where deviceInfo key is the same as attribute name and no conversion is necessary
+  for (final String key in ["motion", "switch", "tamper"]) {
     final keyVal = deviceInfo[key]
     if (keyVal != null) {
-      state[key] = keyVal
+      checkChanged(key, keyVal)
     }
   }
 
+  // Update state values
+  state += deviceInfo.subMap(['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength'])
+
+  // Update data values
   for(final String key in ['firmware', 'hardwareVersion']) {
-    final keyVal = deviceInfo[key]
-    if (keyVal != null && device.getDataValue(key) != keyVal) {
-      device.updateDataValue(key, keyVal)
-    }
+    checkChangedDataValue(key, deviceInfo[key])
   }
 }
 
@@ -140,6 +123,12 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   }
   sendEvent(name: attribute, value: newStatus, unit: unit)
   return changed
+}
+
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
+  }
 }
 
 private String convertToLocalTimeString(final Date dt) {

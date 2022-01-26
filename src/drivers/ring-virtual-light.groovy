@@ -33,19 +33,6 @@ metadata {
     command "getDings"
   }
 
-  // simulator metadata
-  simulator {
-  }
-
-  // UI tile definitions
-  tiles {
-    standardTile("button", "device.switch", width: 2, height: 2, canChangeIcon: true) {
-      state "off", label: 'Off', action: "switch.on", icon: "st.switches.switch.off", backgroundColor: "#ffffff", nextState: "on"
-      state "on", label: 'On', action: "switch.off", icon: "st.switches.switch.on", backgroundColor: "#00A0DC", nextState: "off"
-    }
-    main "button"
-    details "button"
-  }
   preferences {
     input name: "lightPolling", type: "bool", title: "Enable polling for light status on this device", defaultValue: false
     input name: "lightInterval", type: "number", range: 10..600, title: "Number of seconds in between light polls", defaultValue: 15
@@ -208,9 +195,8 @@ private void handleRefresh(final Map msg) {
   else {
     checkChanged("switch", msg.led_status)
   }
-  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
-    device.updateDataValue("firmware", msg.firmware_version)
-  }
+
+  checkChangedDataValue("firmware", msg.firmware_version)
 }
 
 private void handleSet(final Map params) {
@@ -258,6 +244,12 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   }
   sendEvent(name: attribute, value: newStatus, unit: unit)
   return changed
+}
+
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
+  }
 }
 
 private String convertToLocalTimeString(final Date dt) {

@@ -23,9 +23,11 @@ metadata {
     capability "Motion Sensor"
     capability "Audio Volume"
     capability "Battery"
+    capability "TamperAlert"
 
     attribute "brightness", "number"
     attribute "chirps", "enum", ["disabled", "enabled"]
+    attribute "commStatus", "enum", ["error", "ok", "update-queued", "updating", "waiting-for-join", "wrong-network"]
     attribute "lastCheckin", "string"
     attribute "powerSave", "enum", ["off", "on"]
 
@@ -156,26 +158,11 @@ void stopMotion() {
 }
 
 void setValues(final Map deviceInfo) {
-  logDebug "updateDevice(deviceInfo)"
+  logDebug "setValues(deviceInfo)"
   logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo.state != null) {
-    final Map deviceInfoState = deviceInfo.state
-
-    for (final String key in ['brightness', 'volume']) {
-      final keyVal = deviceInfoState.get(key)
-      if (keyVal != null) {
-        checkChanged(key, (keyVal * 100).toInteger())
-      }
-    }
-
-    if (deviceInfoState.chirps != null) {
-      checkChanged("chirps", deviceInfoState.chirps)
-    }
-
-    if (deviceInfoState.powerSave != null) {
-      checkChanged("powerSave", POWER_SAVE[deviceInfoState.powerSave])
-    }
+  if (deviceInfo.powerSave != null) {
+    checkChanged("powerSave", POWER_SAVE[deviceInfo.powerSave])
   }
 
   if (deviceInfo.batteryLevel != null) {
@@ -184,28 +171,27 @@ void setValues(final Map deviceInfo) {
 
   if (deviceInfo.impulseType != null) {
     final String impulseType = deviceInfo.impulseType
-    state.impulseType = impulseType
-    if (impulseType == "comm.heartbeat") {
-      sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
-    } else if (value == "keypad.motion") {
+    if (impulseType == "keypad.motion") {
       checkChanged("motion", "active")
       //The inactive message almost never comes reliably. for now we'll schedule it off
       runIn(motionTimeout.toInteger(), stopMotion)
     }
   }
 
-  for(final String key in ['lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+  // Update attributes where deviceInfo key is the same as attribute name and no conversion is necessary
+  for (final String key in ["brightness", "chirps", "commStatus", "lastCheckin", "tamper", "volume"]) {
     final keyVal = deviceInfo[key]
     if (keyVal != null) {
-      state[key] = keyVal
+      checkChanged(key, keyVal)
     }
   }
 
+  // Update state values
+  state += deviceInfo.subMap(['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength'])
+
+  // Update data values
   for(final String key in ['firmware', 'hardwareVersion']) {
-    final keyVal = deviceInfo[key]
-    if (keyVal != null && device.getDataValue(key) != keyVal) {
-      device.updateDataValue(key, keyVal)
-    }
+    checkChangedDataValue(key, deviceInfo[key])
   }
 }
 
@@ -218,13 +204,10 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   return changed
 }
 
-private String convertToLocalTimeString(final Date dt) {
-  final TimeZone timeZone = location?.timeZone
-  if (timeZone) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
-  }
-  else {
-    return dt.toString()
+
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
   }
 }
 

@@ -95,9 +95,8 @@ private void handleRefresh(final Map msg) {
   if (msg.battery_life != null && !["jbox_v1", "lpd_v1", "lpd_v2"].contains(device.getDataValue("kind"))) {
     checkChanged("battery", msg.battery_life)
   }
-  if (msg.firmware_version && device.getDataValue("firmware") != msg.firmware_version) {
-    device.updateDataValue("firmware", msg.firmware_version)
-  }
+
+  checkChangedDataValue("firmware", msg.firmware_version)
 }
 
 private void handleDings(final String type, final Map msg) {
@@ -131,4 +130,10 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   }
   sendEvent(name: attribute, value: newStatus, unit: unit)
   return changed
+}
+
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
+  }
 }

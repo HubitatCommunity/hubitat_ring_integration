@@ -13,7 +13,6 @@
  *  for the specific language governing permissions and limitations under the License.
  */
 
-import groovy.json.JsonOutput
 import groovy.transform.Field
 
 metadata {
@@ -26,16 +25,18 @@ metadata {
     capability "PowerSource"
     capability "TamperAlert"
 
-    attribute "acStatus", "string"
+    attribute "acStatus", "enum", ["brownout", "connected", "disconnected"]
     attribute "batteryBackup", "string"
     attribute "brightness", "number"
     attribute "countdownTimeLeft", "number"
     attribute "countdownTotal", "number"
+    attribute "commStatus", "enum", ["error", "ok", "update-queued", "updating", "waiting-for-join", "wrong-network"]
     attribute "cellular", "string"
-    attribute "entryDelay", "string"
-    attribute "exitDelay", "string"
-    attribute "fireAlarm", "string"
-    attribute "mode", "string"
+    attribute "entryDelay", "enum", ["active", "inactive"]
+    attribute "exitDelay", "enum", ["active", "inactive"]
+    attribute "coAlarm", "enum", ["active", "inactive"]
+    attribute "fireAlarm", "enum", ["active", "inactive"]
+    attribute "mode",  "enum", ["off", "home", "away"]
     attribute "wifi", "string"
 
     command "setBrightness", [[name: "Set LED Brightness*", type: "NUMBER", range: "0..100", description: "Choose a value between 0 and 100"]]
@@ -91,11 +92,10 @@ def setMode(mode) {
   }
   else {
     logInfo "${device.label} already set to ${mode}.  No change necessary"
+    return
   }
 
-  if (data != null) {
-    parent.simpleRequest("setcommand", [type: "security-panel.switch-mode", zid: device.getDataValue("security-panel-zid"), dst: device.getDataValue("src"), data: data])
-  }
+  parent.simpleRequest("setcommand", [type: "security-panel.switch-mode", zid: device.getDataValue("security-panel-zid"), dst: device.getDataValue("src"), data: data])
 }
 
 /*alarm capabilities start*/
@@ -212,157 +212,141 @@ String getHubZid() {
 
 void setValues(final Map deviceInfo) {
   logDebug "setValues(deviceInfo)"
-  logTrace "deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
+  logTrace "deviceInfo: ${deviceInfo}"
 
-  if (deviceInfo.deviceType in ['access-code.vault', 'adapter.zwave', 'hub.redsky', 'hub.kili', 'security-panel']) {
-    if (device.getDataValue(deviceInfo.deviceType + '-zid') != deviceInfo.zid) {
-      device.updateDataValue(deviceInfo.deviceType + '-zid', deviceInfo.zid)
+  final String deviceType = deviceInfo.deviceType
+
+  if (state.containsKey('lastCommTime')) {
+    log.warn ("Cleaning up old state/data values from ${device}")
+    state.remove('lastCommTime')
+    state.remove('nextExpectedWakeup')
+    state.remove('signalStrength')
+    device.removeDataValue('fingerprint') // Hub doesn't appear to have a fingerprint. Previously value was coming from dataType access-code, which doesn't make sense
+    device.removeDataValue('null-zid')
+  }
+
+  if (CHILD_ZID_DEVICE_TYPES.contains(deviceInfo.deviceType)) {
+    checkChangedDataValue(deviceInfo.deviceType + '-zid', deviceInfo.zid)
+  }
+
+  if (deviceInfo.mode != null) {
+    final String mappedMode = MODES.get(deviceInfo.mode)
+
+    if (checkChanged("mode", mappedMode)) {
+      parent.childParse('mode-set', [msg: [mode: mappedMode]])
+    }
+
+    if (mappedMode == "off") {
+      sendEvent(name: "countdownTimeLeft", value: 0)
+      sendEvent(name: "countdownTotal", value: 0)
+      checkChanged("entryDelay", "inactive")
+      checkChanged("exitDelay", "inactive")
+    }
+
+    if (syncRingToHsm) {
+      final Map<String, String> hsmMode = RING_TO_HSM_MODE_MAP[mappedMode]
+
+      if (location.hsmStatus != hsmMode.status) {
+        logInfo "Setting HSM to ${hsmMode.set}"
+        logTrace "mode: ${mappedMode} hsmStatus: ${location.hsmStatus}"
+        sendLocationEvent(name: "hsmSetArm", value: hsmMode.set)
+      }
+
+      if (cancelAlertsOnDisarm && mappedMode == "off") {
+        sendLocationEvent(name: "hsmSetArm", value: "cancelAlerts")
+      }
     }
   }
 
-  if (deviceInfo.state != null) {
-    final Map deviceInfoState = deviceInfo.state
+  if (deviceInfo.siren != null) {
+    final String alarm = deviceInfo.siren.state == "on" ? "siren" : "off"
 
-    if (deviceInfoState.mode != null) {
-      final String mappedMode = MODES.get(deviceInfoState.mode)
-
-      checkChanged("mode", mappedMode)
-      parent.childParse('mode-set', [msg: [mode: mappedMode]])
-
-      if (mappedMode == "off") {
+    if (checkChanged("alarm", alarm)) {
+      if (alarm != "off") {
         sendEvent(name: "countdownTimeLeft", value: 0)
         sendEvent(name: "countdownTotal", value: 0)
         checkChanged("entryDelay", "inactive")
-        checkChanged("exitDelay", "inactive")
-      }
-
-      if (syncRingToHsm) {
-        final Map<String, String> hsmMode = RING_TO_HSM_MODE_MAP[mappedMode]
-
-        if (location.hsmStatus != hsmMode.status) {
-          logInfo "Setting HSM to ${hsmMode.set}"
-          logTrace "mode: ${mappedMode} hsmStatus: ${location.hsmStatus}"
-          sendLocationEvent(name: "hsmSetArm", value: hsmMode.set)
-        }
-
-        if (cancelAlertsOnDisarm && mappedMode == "off") {
-          sendLocationEvent(name: "hsmSetArm", value: "cancelAlerts")
-        }
-      }
-    }
-
-    if (deviceInfoState.siren != null) {
-      final String alarm = deviceInfoState.siren == "on" ? "siren" : "off"
-
-      if (checkChanged("alarm", alarm)) {
-        if (alarm != "off") {
-          sendEvent(name: "countdownTimeLeft", value: 0)
-          sendEvent(name: "countdownTotal", value: 0)
-          checkChanged("entryDelay", "inactive")
-        }
-      }
-    }
-
-    if (deviceInfoState.alarmInfo != null) {
-      final alarmInfo = deviceInfoState.alarmInfo
-      checkChanged("entryDelay", alarmInfo == "entry-delay" ? "active" : "inactive")
-
-      //TODO: after a small cooking mishap noticed that fire-alarm has a different alarmInfo.state than intrusion so I added an attribute and a
-      //case for it while I decide what to do with it long term.  should this also set the "alarm" attribute or should the base also implement
-      //smoke alarm? or neither and it's just fine in the attribute since there will be a device for the smoke detector?  in fact, do I just
-      //ignore this update because the smoke detector device will already get its own update?  or does it?
-
-      checkChanged("fireAlarm", alarmInfo == "fire-alarm" ? "active" : "inactive")
-
-      //TODO: work on faulted devices
-      //state.faultedDevices.each {
-      //  def faultedDev = parent.getChildByZID(it)
-      //  [DNI: faultedDev.dni, Name: faultedDev.name]
-      //}.collect()
-    }
-
-    if (deviceInfoState.transition != null) {
-      checkChanged("exitDelay", deviceInfoState.transition == "exit" ? "active" : "inactive")
-      sendEvent(name: "countdownTimeLeft", value: deviceInfoState.timeLeft)
-      sendEvent(name: "countdownTotal", value: deviceInfoState.total)
-    }
-
-    if (deviceInfoState.containsKey('transitionDelayEndTimestamp')) {
-      checkChanged("exitDelay", deviceInfoState.transitionDelayEndTimestamp != null ? "active" : "inactive")
-    }
-
-    if (deviceInfoState.percent != null) {
-      log.warn "${device.label} is updating firmware: ${deviceInfoState.percent}% complete"
-    }
-
-    for (final String key in ['brightness', 'volume']) {
-      final keyVal = deviceInfoState.get(key)
-      if (keyVal != null) {
-        checkChanged(key, (keyVal * 100).toInteger())
-      }
-    }
-
-    if (deviceInfoState.version != null) {
-      final Map version = deviceInfoState.version
-      if (version.softwareVersion && device.getDataValue("softwareVersion") != version.softwareVersion) {
-        device.updateDataValue("softwareVersion", version.softwareVersion)
-      }
-    }
-
-    if (deviceInfoState.batteryBackup != null) {
-      checkChanged("batteryBackup", deviceInfoState.batteryBackup)
-    }
-
-    if (deviceInfoState.networks != null) {
-      final Map nw = deviceInfoState.networks
-
-      final Map ppp0 = nw.ppp0
-      if (ppp0 != null) {
-        if (ppp0.type) {
-          device.updateDataValue("ppp0Type", ppp0.type.capitalize())
-        }
-        if (ppp0.name) {
-          device.updateDataValue("ppp0Name", ppp0.name)
-        }
-        if (ppp0.rssi) {
-          device.updateDataValue("ppp0Rssi", ppp0.rssi.toString())
-        }
-
-        final String ppp0Type = device.getDataValue("ppp0Type")
-        final String ppp0Name = device.getDataValue("ppp0Name")
-        final String ppp0Rssi = device.getDataValue("ppp0Rssi")
-
-        logInfo "ppp0 ${ppp0Type} ${ppp0Name} RSSI ${RSSI}"
-        checkChanged('cellular', "${ppp0Name} RSSI ${ppp0Rssi}")
-        state.ppp0 = "${ppp0Name} RSSI ${ppp0Rssi}"
-      }
-
-      final Map wlan0 = nw.wlan0
-      if (wlan0 != null) {
-        if (wlan0.type) {
-          device.updateDataValue("wlan0Type", wlan0.type.capitalize())
-        }
-        if (wlan0.ssid) {
-          device.updateDataValue("wlan0Ssid", wlan0.ssid)
-        }
-        if (wlan0.rssi) {
-          device.updateDataValue("wlan0Rssi", wlan0.rssi.toString())
-        }
-
-        final String wlan0Type = device.getDataValue("wlan0Type")
-        final String wlan0Ssid = device.getDataValue("wlan0Ssid")
-        final String wlan0Rssi = device.getDataValue("wlan0Rssi")
-
-        logInfo "wlan0 ${wlan0Type} ${wlan0Ssid} RSSI ${RSSI}"
-        checkChanged('wifi', "${wlan0Ssid} RSSI ${wlan0Rssi}")
-        state.wlan0 = "${wlan0Ssid} RSSI ${wlan0Rssi}"
       }
     }
   }
 
-  if (deviceInfo.tamperStatus != null) {
-    checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
+  // Use containsKey instead of null chuck because alarmInfo == null means an alarm was cleared
+  if (deviceInfo.containsKey('alarmInfo')) {
+    final alarmInfo = deviceInfo.alarmInfo
+    checkChanged("entryDelay", alarmInfo == "entry-delay" ? "active" : "inactive")
+
+    // These duplicate what the co/smoke alarm devices already display
+    checkChanged("coAlarm", alarmInfo == "co-alarm" ? "active" : "inactive")
+    checkChanged("fireAlarm", alarmInfo == "fire-alarm" ? "active" : "inactive")
   }
+
+  if (deviceInfo.transition != null) {
+    checkChanged("exitDelay", deviceInfo.transition == "exit" ? "active" : "inactive")
+    sendEvent(name: "countdownTimeLeft", value: deviceInfo.timeLeft)
+    sendEvent(name: "countdownTotal", value: deviceInfo.total)
+  }
+
+  if (deviceInfo.containsKey('transitionDelayEndTimestamp')) {
+    checkChanged("exitDelay", deviceInfo.transitionDelayEndTimestamp != null ? "active" : "inactive")
+  }
+
+  if (deviceInfo.percent != null) {
+    log.warn "${device.label} is updating firmware: ${deviceInfo.percent}% complete"
+  }
+
+  if (deviceInfo.version != null) {
+    final softwareVersion = deviceInfo.version?.softwareVersion
+    if (softwareVersion != null) {
+      checkChangedDataValue("softwareVersion", softwareVersion)
+    }
+  }
+
+  if (deviceInfo.networks != null) {
+    final Map nw = deviceInfo.networks
+
+    final Map ppp0 = nw.ppp0
+    if (ppp0 != null) {
+      if (ppp0.type) {
+        device.updateDataValue("ppp0Type", ppp0.type.capitalize())
+      }
+      if (ppp0.name) {
+        device.updateDataValue("ppp0Name", ppp0.name)
+      }
+      if (ppp0.rssi) {
+        device.updateDataValue("ppp0Rssi", ppp0.rssi.toString())
+      }
+
+      final String ppp0Type = device.getDataValue("ppp0Type")
+      final String ppp0Name = device.getDataValue("ppp0Name")
+      final String ppp0Rssi = device.getDataValue("ppp0Rssi")
+
+      logInfo "ppp0 ${ppp0Type} ${ppp0Name} RSSI ${RSSI}"
+      checkChanged('cellular', "${ppp0Name} RSSI ${ppp0Rssi}")
+      state.ppp0 = "${ppp0Name} RSSI ${ppp0Rssi}"
+    }
+
+    final Map wlan0 = nw.wlan0
+    if (wlan0 != null) {
+      if (wlan0.type) {
+        device.updateDataValue("wlan0Type", wlan0.type.capitalize())
+      }
+      if (wlan0.ssid) {
+        device.updateDataValue("wlan0Ssid", wlan0.ssid)
+      }
+      if (wlan0.rssi) {
+        device.updateDataValue("wlan0Rssi", wlan0.rssi.toString())
+      }
+
+      final String wlan0Type = device.getDataValue("wlan0Type")
+      final String wlan0Ssid = device.getDataValue("wlan0Ssid")
+      final String wlan0Rssi = device.getDataValue("wlan0Rssi")
+
+      logInfo "wlan0 ${wlan0Type} ${wlan0Ssid} RSSI ${RSSI}"
+      checkChanged('wifi', "${wlan0Ssid} RSSI ${wlan0Rssi}")
+      state.wlan0 = "${wlan0Ssid} RSSI ${wlan0Rssi}"
+    }
+  }
+
 
   if (deviceInfo.acStatus != null) {
     final acStatus = deviceInfo.acStatus
@@ -370,18 +354,20 @@ void setValues(final Map deviceInfo) {
     checkChanged("powerSource", POWER_SOURCE.getOrDefault(acStatus, "unknown"))
   }
 
-  for(final String key in ['impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+  // Update attributes where deviceInfo key is the same as attribute name and no conversion is necessary
+  for (final String key in ["batteryBackup", "brightness", "commStatus", "tamper", "volume"]) {
     final keyVal = deviceInfo[key]
     if (keyVal != null) {
-      state[key] = keyVal
+      checkChanged(key, keyVal)
     }
   }
 
+  // Update state values
+  state += deviceInfo.subMap(['impulseType', 'lastUpdate'])
+
+  // Update data values
   for(final String key in ['firmware', 'hardwareVersion']) {
-    final keyVal = deviceInfo[key]
-    if (keyVal != null && device.getDataValue(key) != keyVal) {
-      device.updateDataValue(key, keyVal)
-    }
+    checkChangedDataValue(key, deviceInfo[key])
   }
 }
 
@@ -393,6 +379,15 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   sendEvent(name: attribute, value: newStatus, unit: unit)
   return changed
 }
+
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
+  }
+}
+
+// Child device types to save zid for
+@Field final static HashSet<String> CHILD_ZID_DEVICE_TYPES = ['access-code.vault', 'adapter.zwave', 'security-panel']
 
 @Field final static Map RING_TO_HSM_MODE_MAP = [
   "home": [set: "armHome", status: "armedHome"],

@@ -13,8 +13,6 @@
  *  for the specific language governing permissions and limitations under the License.
  */
 
-import groovy.json.JsonOutput
-
 metadata {
   definition(name: "Ring Virtual Retrofit Alarm Kit", namespace: "ring-hubitat-codahq", author: "Ben Rimmasch",
     importUrl: "https://raw.githubusercontent.com/codahq/ring_hubitat_codahq/master/src/drivers/ring-virtual-retrofit-alarm-kit.groovy") {
@@ -23,6 +21,7 @@ metadata {
     capability "Battery"
     capability "TamperAlert"
 
+    attribute "commStatus", "enum", ["error", "ok", "update-queued", "updating", "waiting-for-join", "wrong-network"]
     attribute "lastCheckin", "string"
   }
 
@@ -51,41 +50,27 @@ def refresh() {
 }
 
 void setValues(final Map deviceInfo) {
-  logDebug "updateDevice(deviceInfo)"
-  logTrace "deviceInfo: ${JsonOutput.prettyPrint(JsonOutput.toJson(deviceInfo))}"
-
-  if (deviceInfo.componentDevices != null) {
-    state.componentDevices = deviceInfo.componentDevices
-  }
+  logDebug "setValues(deviceInfo)"
+  logTrace "deviceInfo: ${deviceInfo}"
 
   if (deviceInfo.batteryLevel != null) {
     checkChanged("battery", deviceInfo.batteryLevel, "%")
   }
 
-  if (deviceInfo.tamperStatus != null) {
-    checkChanged("tamper", deviceInfo.tamperStatus == "tamper" ? "detected" : "clear")
-  }
-
-  if (deviceInfo.impulseType != null) {
-    final String impulseType = deviceInfo.impulseType
-    state.impulseType = impulseType
-    if (impulseType == "comm.heartbeat") {
-      sendEvent(name: "lastCheckin", value: convertToLocalTimeString(new Date()))
-    }
-  }
-
-  for(final String key in ['lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength']) {
+  // Update attributes where deviceInfo key is the same as attribute name and no conversion is necessary
+  for (final String key in ["commStatus", "lastCheckin", "tamper"]) {
     final keyVal = deviceInfo[key]
     if (keyVal != null) {
-      state[key] = keyVal
+      checkChanged(key, keyVal)
     }
   }
 
+  // Update state values
+  state += deviceInfo.subMap(['componentDevices', 'impulseType', 'lastCommTime', 'lastUpdate', 'nextExpectedWakeup', 'signalStrength'])
+
+  // Update data values
   for(final String key in ['firmware', 'hardwareVersion']) {
-    final keyVal = deviceInfo[key]
-    if (keyVal != null && device.getDataValue(key) != keyVal) {
-      device.updateDataValue(key, keyVal)
-    }
+    checkChangedDataValue(key, deviceInfo[key])
   }
 }
 
@@ -98,12 +83,8 @@ boolean checkChanged(final String attribute, final newStatus, final String unit=
   return changed
 }
 
-private String convertToLocalTimeString(final Date dt) {
-  final TimeZone timeZone = location?.timeZone
-  if (timeZone) {
-    return dt.format("yyyy-MM-dd h:mm:ss a", timeZone)
-  }
-  else {
-    return dt.toString()
+void checkChangedDataValue(final String name, final value) {
+  if (value != null && device.getDataValue(name) != value) {
+    device.updateDataValue(name, value)
   }
 }
