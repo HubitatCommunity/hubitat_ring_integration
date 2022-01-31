@@ -90,6 +90,8 @@ void setValues(final Map deviceInfo) {
   }
 }
 
+@Field final HashSet<String> NO_BATTERY_DEVICES = ["ring-beams-c5000"]
+
 boolean checkChanged(final String attribute, final newStatus, final String unit=null) {
   final boolean changed = device.currentValue(attribute) != newStatus
   if (changed) {

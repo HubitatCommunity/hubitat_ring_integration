@@ -111,7 +111,7 @@ void setValues(final Map deviceInfo) {
     }
 
     if (deviceInfoState.version != null) {
-      final Map version = deviceInfoState.version
+      final version = deviceInfoState.version
 
       if (deviceInfo.deviceType == "adapter.ringnet") {
         for(final String key in ['buildNumber', 'nordicFirmwareVersion', 'softwareVersion']) {
