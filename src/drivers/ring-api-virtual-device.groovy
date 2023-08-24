@@ -1209,6 +1209,7 @@ ChildDeviceWrapper getChildByZID(final String zid) {
   "motion-sensor.beams": "Ring Virtual Beams Motion Sensor",
   "group.light-group.beams": "Ring Virtual Beams Group",
   "beams_bridge_v1": "Ring Virtual Beams Bridge",
+  "switch.transformer.beams": "Ring Virtual Beams Light",
 ].asImmutable()
 
 // The alarm hub and beams bridge are made up of multiple composite devices. Messages for these device types will be
