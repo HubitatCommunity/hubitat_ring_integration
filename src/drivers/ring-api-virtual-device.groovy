@@ -1,4 +1,6 @@
 /**
+ * IMPORT URL: https://raw.githubusercontent.com/HubitatCommunity/hubitat_ring_integration/master/src/drivers/ring-api-virtual-device.groovy
+ *
  *  Ring API Virtual Device Driver
  *
  *  Copyright 2019-2020 Ben Rimmasch
