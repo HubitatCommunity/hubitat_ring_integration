@@ -78,7 +78,7 @@ The packages can be installed either manually or through the Hubitat Package Man
 
 ### Using Hubitat Package Manager ###
 
-- Make sure Hubitat Package Manager is installed and working. See [hubitat-packagemanager](https://github.com/dcmeglio/hubitat-packagemanager)
+- Make sure Hubitat Package Manager is installed and working. See [hubitat-packagemanager](https://github.com/HubitatCommunity/hubitatpackagemanager)
 - This package can be found in the Integrations section, or you can install by URL using this link: [packageManifest.json](https://raw.githubusercontent.com/HubitatCommunity/hubitat_ring_integration/master/packageManifest.json)
 - Make sure to select the optional device drivers that you will need when prompted
 
@@ -89,7 +89,8 @@ The packages can be installed either manually or through the Hubitat Package Man
 
 ### Configuration ###
 
-- Create an instance of the app. (Create instances of custom apps using the "Apps" link in the left navigation of the Hubitat hub.)
+- Create an instance of the app. (Create instances of custom apps using the "Apps" link in the left navigation of the Hubitat hub, Add User App, then hit Done)
+- Now go back into App 'Unofficial Ring Connect'
 - Authenticate to Ring in the app by giving it your Ring credentials and choose your location.
 - Click the "Discover Devices" link in the app.  If you have alarm or security devices be sure to also pick to install the "Ring Virtual API Device".  The app will create any devices you select here for you.
 - **You won't get motion or ring notifications or events on cameras and doorbells until you configure them.**  There are instructions in the app to set them up under the "Configure the way that Hubitat will get motion alert and ring events" link.  **It is highly recommended to use IFTTT for notifications.**  You can poll for events but it is often unreliable.
