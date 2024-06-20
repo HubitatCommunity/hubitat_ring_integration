@@ -23,16 +23,24 @@ metadata {
     capability "Refresh"
     capability "Sensor"
     capability "Switch"
+    capability "SwitchLevel"
+    capability "Health Check"
 
     attribute "firmware", "string"
     attribute "rssi", "number"
     attribute "wifi", "string"
+    attribute "healthStatus", "enum", [ "unknown", "offline", "online" ]
 
     command "alarmOff"
     command "getDings"
+    command "snoozeMotionAlerts", [
+        [name:"minutes", type:"NUMBER", description:"Number of minutes to snooze motion alerts for", constraints:["NUMBER"]] ]
+    command "motionActivatedLights", [
+		[name:"state", description:"Enable or disable lights on motion", type: "ENUM", constraints: ["enabled","disabled"]] ]
   }
 
   preferences {
+    input name: "deviceStatusPollingEnable", type: "bool", title: "Enable polling for device status", defaultValue: true
     input name: "lightPolling", type: "bool", title: "Enable polling for light status on this device", defaultValue: false
     input name: "lightInterval", type: "number", range: 10..600, title: "Number of seconds in between light polls", defaultValue: 15
     input name: "snapshotPolling", type: "bool", title: "Enable polling for thumbnail snapshots on this device", defaultValue: false
@@ -90,9 +98,35 @@ def pollLight() {
   }
 }
 
+def snoozeMotionAlerts(minutes = 60) {
+    parent.apiRequestDeviceControl(device.deviceNetworkId, "doorbots", "motion_snooze?time=${minutes}", null)
+}
+
+
+def motionActivatedLights(state) {
+    // This is backwards as it's manipulating "always snooze"
+    stateOfLight = state == "enabled" ? false : true
+    parent.apiRequestDeviceApiSet(device.deviceNetworkId, "devices", "settings", ["enable":stateOfLight,"light_snooze_settings":["always_on":stateOfLight]])
+}
+
 def updated() {
   setupPolling()
   parent.snapshotOption(device.deviceNetworkId, snapshotPolling)
+  scheduleDevicePolling()
+}
+
+def installed() {
+  scheduleDevicePolling()
+}
+
+def scheduleDevicePolling() {
+  unschedule(pollDeviceStatus)
+  // Schedule at a random second starting at the next minute
+  def nextMinute = ((new Date().format( "m" ) as int) + 1) % 60
+  Random rnd = new Random()
+  if (deviceStatusPollingEnable) {
+      schedule( "${rnd.nextInt(59)} ${nextMinute}/30 * ? * *", "refresh" )
+  }
 }
 
 def on() {
@@ -103,6 +137,12 @@ def on() {
 def off() {
   alarmOff(false)
   switchOff()
+}
+
+def setLevel(level) {
+  // Translating SwitchLevel 0-100% to Ring brightness (1-10)
+  Integer brightnessLevel = Math.max(1, (level / 10) as Integer)
+  parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "light_intensity?doorbot%5Bsettings%5D%5Blight_intensity%5D=${brightnessLevel}")
 }
 
 def switchOff() {
@@ -173,6 +213,13 @@ void handleDeviceSet(final String action, final Map msg, final Map query) {
   else if (action == "siren_off") {
     checkChanged('alarm', "off")
   }
+  else if (action == "settings") {
+    log.trace("Updated setting: ${query}")
+  }
+  else if (action.startsWith("light_intensity?doorbot%5Bsettings%5D%5Blight_intensity%5D=")) {
+    Integer brightnessLevel = (action.split('=')[1] as Integer) * 10
+    checkChanged("level", brightnessLevel)
+  }
   else {
     log.error "handleDeviceSet unsupported action ${action}, msg=${msg}, query=${query}"
   }
@@ -202,6 +249,13 @@ void handleMotion(final Map msg) {
 }
 
 void handleRefresh(final Map msg) {
+  if (msg?.alerts?.connection != null) {
+    checkChanged("healthStatus", msg.alerts.connection) // devices seem to be considered offline after 20 minutes
+  }
+  else {
+    checkChanged("healthStatus", "unknown")
+  }
+    
   if (msg.led_status) {
     checkChanged("switch", msg.led_status)
   }
@@ -212,6 +266,11 @@ void handleRefresh(final Map msg) {
     if (secondsRemaining > 0) {
       runIn(secondsRemaining + 1, refresh)
     }
+  }
+
+  if (msg.settings?.floodlight_settings?.brightness != null) {
+    final Integer brightnessLevel = msg.settings.floodlight_settings.brightness * 10
+    checkChanged("level", brightnessLevel)
   }
 
   if (msg.is_sidewalk_gateway) {

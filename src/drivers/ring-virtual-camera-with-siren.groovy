@@ -24,15 +24,20 @@ metadata {
     capability "PushableButton"
     capability "Refresh"
     capability "Sensor"
+    capability "Health Check"
 
     attribute "firmware", "string"
     attribute "rssi", "number"
     attribute "wifi", "string"
+    attribute "healthStatus", "enum", [ "unknown", "offline", "online" ]
 
     command "getDings"
+    command "snoozeMotionAlerts", [
+        [name:"minutes", type:"NUMBER", description:"Number of minutes to snooze motion alerts for", constraints:["NUMBER"]] ]
   }
 
   preferences {
+    input name: "deviceStatusPollingEnable", type: "bool", title: "Enable polling for device status", defaultValue: true
     input name: "snapshotPolling", type: "bool", title: "Enable polling for thumbnail snapshots on this device", defaultValue: false
     input name: "descriptionTextEnable", type: "bool", title: "Enable descriptionText logging", defaultValue: false
     input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
@@ -73,10 +78,30 @@ def getDings() {
 
 def updated() {
   parent.snapshotOption(device.deviceNetworkId, snapshotPolling)
+  scheduleDevicePolling()
+}
+
+def installed() {
+  scheduleDevicePolling()
+}
+
+def scheduleDevicePolling() {
+  unschedule(pollDeviceStatus)
+    
+  // Schedule at a random second starting in the next ~10 minutes
+  Random rnd = new Random()
+  def scheduledMinute = ((new Date().format( "m" ) as int) + rnd.nextInt(10)) % 60
+  if (deviceStatusPollingEnable) {
+      schedule( "${rnd.nextInt(59)} ${scheduledMinute}/30 * ? * *", "refresh" )
+  }
 }
 
 def off() {
   parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "siren_off")
+}
+
+def snoozeMotionAlerts(minutes = 60) {
+    parent.apiRequestDeviceControl(device.deviceNetworkId, "doorbots", "motion_snooze?time=${minutes}", null)
 }
 
 def siren() {
@@ -135,12 +160,20 @@ void handleMotion(final Map msg) {
 }
 
 void handleRefresh(final Map msg) {
+  if (msg?.alerts?.connection != null) {
+    checkChanged("healthStatus", msg.alerts.connection) // devices seem to be considered offline after 20 minutes
+  }
+  else {
+    checkChanged("healthStatus", "unknown")
+  }
+    
   if (msg.battery_life != null) {
     checkChanged("battery", msg.battery_life, '%')
   }
   else if (msg.battery_life_2 != null) {
     checkChanged("battery", msg.battery_life_2, "%")
   }
+  
   if (msg.siren_status?.seconds_remaining != null) {
     final Integer secondsRemaining = msg.siren_status.seconds_remaining
     checkChanged("alarm", secondsRemaining > 0 ? "siren" : "off")
@@ -148,6 +181,7 @@ void handleRefresh(final Map msg) {
       runIn(secondsRemaining + 1, refresh)
     }
   }
+  
   if (msg.health) {
     final Map health = msg.health
 
