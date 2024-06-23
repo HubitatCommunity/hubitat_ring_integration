@@ -1,3 +1,4 @@
+/* groovylint-disable Indentation */
 /**
  *  Ring Virtual Light with Siren Device Driver
  *
@@ -23,13 +24,17 @@ metadata {
     capability "Refresh"
     capability "Sensor"
     capability "Switch"
+    capability "SwitchLevel"
 
+    attribute "connectionStatus", "enum", ["offline", "online"]
     attribute "firmware", "string"
+    attribute 'motionActivatedLights', 'enum', ["enabled", "disabled"]
     attribute "rssi", "number"
     attribute "wifi", "string"
 
     command "alarmOff"
     command "getDings"
+    command "motionActivatedLights", [[name: "state", description: "Enable or disable lights on motion", type: "ENUM", constraints: ["enable", "disable"]] ]
   }
 
   preferences {
@@ -44,45 +49,56 @@ metadata {
   }
 }
 
-void logInfo(msg) {
-  if (descriptionTextEnable) { log.info msg }
-}
+void installed() { updated() }
 
-void logDebug(msg) {
-  if (logEnable) { log.debug msg }
-}
+void updated() {
+  parentCheck()
 
-void logTrace(msg) {
-  if (traceLogEnable) { log.trace msg }
-}
-
-def parse(String description) {
-  logDebug "description: ${description}"
-}
-
-def poll() {
-  refresh()
-}
-
-def refresh() {
-  logDebug "refresh()"
-  parent.apiRequestDeviceRefresh(device.deviceNetworkId)
-  parent.apiRequestDeviceHealth(device.deviceNetworkId, "doorbots")
-}
-
-def getDings() {
-  logDebug "getDings()"
-  parent.apiRequestDings()
-}
-
-def setupPolling() {
   unschedule()
   if (lightPolling) {
     pollLight()
   }
+
+  parent.updateEnabledSnappables()
 }
 
-def pollLight() {
+void parentCheck() {
+  if (device.parentAppId == null || device.parentDeviceId != null) {
+    log.error("This device can only be installed using the Unofficial Ring Connect app. Remove this device and create it through the app. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
+  if (descriptionTextEnable) { log.info msg }
+}
+
+void logDebug(Object msg) {
+  if (logEnable) { log.debug msg }
+}
+
+void logTrace(Object msg) {
+  if (traceLogEnable) { log.trace msg }
+}
+
+void parse(String description) {
+  logDebug "description: ${description}"
+}
+
+void poll() { refresh() }
+
+void refresh() {
+  logDebug "refresh()"
+  parent.apiRequestClientsApiRefresh(device.deviceNetworkId)
+  parent.apiRequestClientsApiHealth(device.deviceNetworkId, "doorbots")
+  parent.apiRequestDevicesApiSet(device.deviceNetworkId, "devices", action: "settings", method: 'Get')
+}
+
+void getDings() {
+  logDebug "getDings()"
+  parent.apiRequestDings()
+}
+
+void pollLight() {
   logTrace "pollLight()"
   refresh()
   if (pollLight) {
@@ -90,30 +106,36 @@ def pollLight() {
   }
 }
 
-def updated() {
-  setupPolling()
-  parent.snapshotOption(device.deviceNetworkId, snapshotPolling)
-}
-
-def on() {
+void on() {
   state.strobing = false
-  parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "floodlight_light_on")
+  setFloodlightInternal('on')
 }
 
-def off() {
+void off() {
   alarmOff(false)
   switchOff()
 }
 
-def switchOff() {
+void setLevel(level, duration=null) {
+  if (duration != null) {
+    log.warn("setLevel duration value not supported")
+  }
+
+  // Translating SwitchLevel 0-100% to Ring brightness (1-10)
+  Integer brightnessLevel = Math.max(1, (level / 10).toInteger())
+  parent.apiRequestClientsApiSet(device.deviceNetworkId, "doorbots", action: 'light_intensity', method: 'Put',
+                                 query: ["doorbot[settings][light_intensity]": brightnessLevel])
+}
+
+void switchOff() {
   if (state.strobing) {
     unschedule()
   }
   state.strobing = false
-  parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "floodlight_light_off")
+  setFloodlightInternal('off')
 }
 
-def alarmOff(boolean modifyLight = true) {
+void alarmOff(boolean modifyLight = true) {
   final String alarm = device.currentValue("alarm")
   logTrace "alarm: $alarm"
   sendEvent(name: "alarm", value: "off")
@@ -121,42 +143,50 @@ def alarmOff(boolean modifyLight = true) {
     switchOff()
   }
   if (alarm == "siren" || alarm == "both") {
-    parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "siren_off")
+    setSirenInternal('off')
   }
 }
 
-def siren() {
-  parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "siren_on")
+void siren() {
+  setSirenInternal('on')
 }
 
-def strobe(value = "strobe") {
-  logInfo "$device was set to strobe with a rate of $strobeRate milliseconds for $strobeTimeout seconds"
+void strobe(value = "strobe") {
+  logInfo "${device.displayName} was set to strobe with a rate of $strobeRate milliseconds for $strobeTimeout seconds"
   state.strobing = true
   strobeOn()
   sendEvent(name: "alarm", value: value)
   runIn(strobeTimeout.toInteger(), alarmOff)
 }
 
-def both() {
+void both() {
   strobe("both")
   siren()
 }
 
-def strobeOn() {
+void strobeOn() {
   if (state.strobing) {
     runInMillis(strobeRate.toInteger(), strobeOff)
-    parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "floodlight_light_on")
+    setFloodlightInternal('on')
   }
 }
 
-def strobeOff() {
+void strobeOff() {
   if (state.strobing) {
     runInMillis(strobeRate.toInteger(), strobeOn)
-    parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "floodlight_light_off")
+    setFloodlightInternal('off')
   }
 }
 
-void handleDeviceSet(final String action, final Map msg, final Map query) {
+void motionActivatedLights(state) {
+    // This is backwards as it's manipulating "always snooze"
+    final boolean stateOfLight = !(state == "enable")
+    parent.apiRequestDevicesApiSet(device.deviceNetworkId, "devices", action: "settings", body: [enable: stateOfLight, light_snooze_settings: ["always_on": stateOfLight]])
+}
+
+void handleClientsApiSet(final Map msg, final Map arguments) {
+  String action = arguments.action
+
   if (action == "floodlight_light_on") {
     checkChanged("switch", "on")
   }
@@ -173,12 +203,32 @@ void handleDeviceSet(final String action, final Map msg, final Map query) {
   else if (action == "siren_off") {
     checkChanged('alarm', "off")
   }
+  else if (action == "light_intensity") {
+    Integer brightnessLevel = arguments.query?.get("doorbot[settings][light_intensity]")
+    if (brightnessLevel != null) {
+      checkChanged("level", brightnessLevel * 10)
+    }
+  }
   else {
-    log.error "handleDeviceSet unsupported action ${action}, msg=${msg}, query=${query}"
+    log.error "handleClientsApiSet unsupported action ${action}, msg=${msg}, arguments=${arguments}"
   }
 }
 
-void handleHealth(final Map msg) {
+void handleDevicesApiSet(final Map msg, final Map arguments) {
+  String action = arguments.action
+
+  if (action == "settings") {
+    if (msg.light_snooze_settings?.always_on != null) {
+      // This is backwards as it's manipulating "always snooze"
+      checkChanged("motionActivatedLights", msg.light_snooze_settings?.always_on ? "disabled" : "enabled")
+    }
+  }
+  else {
+    log.error "handleClientsApiSet unsupported action ${action}, msg=${msg}, arguments=${arguments}"
+  }
+}
+
+void handleClientsApiHealth(final Map msg) {
   if (msg.device_health) {
     if (msg.device_health.wifi_name) {
       checkChanged("wifi", msg.device_health.wifi_name)
@@ -201,7 +251,11 @@ void handleMotion(final Map msg) {
   }
 }
 
-void handleRefresh(final Map msg) {
+void handleClientsApiRefresh(final Map msg) {
+  if (msg.alerts?.connection != null) {
+    checkChanged("connectionStatus", msg.alerts.connection) // devices seem to be considered offline after 20 minutes
+  }
+
   if (msg.led_status) {
     checkChanged("switch", msg.led_status)
   }
@@ -214,10 +268,6 @@ void handleRefresh(final Map msg) {
     }
   }
 
-  if (msg.is_sidewalk_gateway) {
-    log.warn("Your device is being used as an Amazon sidewalk device.")
-  }
-
   if (msg.health) {
     Map health = msg.health
 
@@ -228,6 +278,16 @@ void handleRefresh(final Map msg) {
     if (health.rssi) {
       checkChanged("rssi", health.rssi)
     }
+
+    // Per Ring: is_sidewalk_gateway indicates only whether a device *can* be used as a Sidewalk gateway. sidewalk_connection
+    // indicates whether Sidewalk is enabled in the Ring account. Both must be true for Sidewalk to be enabled on a device
+    if (msg.is_sidewalk_gateway && health.sidewalk_connection) {
+      log.warn("Your device is being used as an Amazon sidewalk device.")
+    }
+  }
+
+  if (msg.settings?.floodlight_settings?.brightness != null) {
+    checkChanged("level", msg.settings.floodlight_settings.brightness * 10)
   }
 }
 
@@ -241,8 +301,16 @@ void runCleanup() {
   device.removeDataValue("device_id")
 }
 
+void setFloodlightInternal(String state) {
+    parent.apiRequestClientsApiSet(device.deviceNetworkId, "doorbots", action: "floodlight_light_" + state, method: 'Put')
+}
+
+void setSirenInternal(String state) {
+    parent.apiRequestClientsApiSet(device.deviceNetworkId, "doorbots", action: "siren_" + state, method: 'Put')
+}
+
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

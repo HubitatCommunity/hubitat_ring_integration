@@ -61,15 +61,25 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void installed() { updated() }
+
+void updated() { parentCheck() }
+
+void parentCheck() {
+  if (device.parentDeviceId == null || device.parentAppId != null) {
+    log.error("This device can only be installed using the Ring API Virtual Device. Remove this device and use createDevices in Ring API Virtual Device. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
@@ -79,7 +89,7 @@ void refresh() {
   parent.refresh(device.getDataValue("src"))
 }
 
-def setMode(mode) {
+void setMode(mode) {
   logDebug "setMode(${mode})"
   Map data
   if (mode == "Disarmed" && device.currentValue("mode") != "off") {
@@ -99,25 +109,25 @@ def setMode(mode) {
   parent.apiWebsocketRequestSetCommand("security-panel.switch-mode", device.getDataValue("src"), device.getDataValue("security-panel-zid"), data)
 }
 
-def off() {
+void off() {
   logTrace "previous value alarm: ${device.currentValue("alarm")}"
   parent.apiWebsocketRequestSetCommand("security-panel.silence-siren", device.getDataValue("src"), device.getDataValue("security-panel-zid"))
 }
 
-def siren() {
+void siren() {
   parent.apiWebsocketRequestSetCommand("security-panel.sound-siren", device.getDataValue("src"), device.getDataValue("security-panel-zid"))
 }
 
-def strobe() {
+void strobe() {
   log.error "The device ${device.getDisplayName()} does not support the strobe functionality"
 }
 
-def both() {
+void both() {
   strobe()
   siren()
 }
 
-def sirenTest() {
+void sirenTest() {
   if (device.currentValue("mode") != "off") {
     log.warn "Please disarm the alarm before testing the siren."
     return
@@ -125,7 +135,7 @@ def sirenTest() {
   parent.apiWebsocketRequestSetCommand("siren-test.start", null, device.getDataValue("security-panel-zid"))
 }
 
-def sirenTestCancel() {
+void sirenTestCancel() {
   parent.apiWebsocketRequestSetCommand("siren-test.stop", device.getDataValue("src"), device.getDataValue("security-panel-zid"))
 }
 
@@ -177,7 +187,7 @@ void unmute() {
   setVolume(state.prevVolume)
 }
 
-def setBrightness(brightness) {
+void setBrightness(brightness) {
   // Value must be in [0, 100]
   brightness = Math.min(Math.max(brightness == null ? 100 : brightness.toInteger(), 0), 100)
 
@@ -237,11 +247,11 @@ void setValues(final Map deviceInfo) {
     }
   }
 
-  // Use containsKey instead of null chuck because alarmInfo == null means an alarm was cleared
+  // Use containsKey instead of null check because alarmInfo == null means an alarm was cleared
   if (deviceInfo.containsKey('alarmInfo')) {
     // @note Other possible values of alarmInfo.state: 'panic'
 
-    final alarmInfo = deviceInfo.alarmInfo?.state
+    final String alarmInfo = deviceInfo.alarmInfo?.state
     checkChanged("entryDelay", alarmInfo == "entry-delay" ? "active" : "inactive")
 
     // These duplicate what the co/smoke alarm devices already display
@@ -249,7 +259,7 @@ void setValues(final Map deviceInfo) {
     checkChanged("fireAlarm", alarmInfo == "fire-alarm" ? "active" : "inactive")
   }
 
-  // Use containsKey instead of null chuck because lastConnectivityCheckError == null means an connectivity error was resolved
+  // Use containsKey instead of null check because lastConnectivityCheckError == null means an connectivity error was resolved
   if (deviceInfo.containsKey('lastConnectivityCheckError')) {
     if (deviceInfo.lastConnectivityCheckError) {
       log.error "Ring connectivity error: ${deviceInfo.lastConnectivityCheckError}"
@@ -258,7 +268,7 @@ void setValues(final Map deviceInfo) {
     }
   }
 
-  // Use containsKey instead of null chuck because transitionDelayEndTimestamp == null means the exit delay ended
+  // Use containsKey instead of null check because transitionDelayEndTimestamp == null means the exit delay ended
   if (deviceInfo.containsKey('transitionDelayEndTimestamp')) {
     checkChanged("exitDelay", deviceInfo.transitionDelayEndTimestamp != null ? "active" : "inactive")
   }
@@ -267,19 +277,23 @@ void setValues(final Map deviceInfo) {
     final Map networks = deviceInfo.networks
 
     if (deviceInfo.containsKey('networkConnection')) {
-      final networkConnection = deviceInfo.networkConnection
-
-      checkChanged("networkConnection", networks.getOrDefault(networkConnection, [type: "unknown"]).type)
+      checkChanged("networkConnection", networks.getOrDefault(deviceInfo.networkConnection, [type: "unknown"]).type)
     }
 
     for (final entry in networks.subMap(['eth0', 'ppp0', 'wlan0'])) {
       final Map network = entry.value
       final String networkKey = entry.key
+
+      if (network == null) {
+        logDebug "Got a null networks key for ${networkKey}. Ignoring"
+        continue
+      }
+
       final String networkType = network.type
 
-      // Sometimes the type isn't included. Just skip updating things for now
+      // Sometimes the type isn't included. Just skip updating things
       if (!networkType) {
-        logDebug "Could not get network.type for ${networkKey}: ${networks}"
+        logDebug "Could not get network.type for ${networkKey}: ${networks}. Ignoring"
         continue
       }
 
@@ -315,7 +329,7 @@ void setValues(final Map deviceInfo) {
   }
 
   if (deviceInfo.acStatus != null) {
-    final acStatus = deviceInfo.acStatus
+    final String acStatus = deviceInfo.acStatus
     checkChanged("acStatus", AC_STATUS.getOrDefault(acStatus, "brownout"))
     checkChanged("powerSource", POWER_SOURCE.getOrDefault(acStatus, "unknown"))
   }
@@ -327,11 +341,7 @@ void setValues(final Map deviceInfo) {
 
     if (checkChanged("volume", volume)) {
       state.prevVolume == prevVolume
-      if (volume == 0) {
-        checkChanged("mute", "muted")
-      } else {
-        checkChanged("mute", "unmuted")
-      }
+      checkChanged("mute", volume == 0 ? "muted" : "unmuted")
     }
   }
 
@@ -343,7 +353,18 @@ void setValues(final Map deviceInfo) {
   // Update state values
   Map stateValues = deviceInfo.subMap(['lastNetworkLatencyEvent', 'lastUpdate', 'impulseType'])
   if (stateValues) {
-      state << stateValues
+    state << stateValues
+
+    if (stateValues.impulseType?.startsWith('firmware-update.')) {
+      String impulseTypeSuffix = stateValues.impulseType.substring(16)
+
+      if (impulseTypeSuffix in ['canceled', 'downloading', 'reverted', 'started', 'succeeded', 'user-aborted', 'verified']) {
+        log.warn('Firmware update ' + impulseTypeSuffix)
+      }
+      else if (impulseTypeSuffix in ['failed', 'unsuccessful']) {
+        log.error('Firmware update ' + impulseTypeSuffix)
+      }
+    }
   }
 }
 
@@ -351,7 +372,7 @@ void setPassthruValues(final Map deviceInfo) {
   logDebug "setPassthruValues(${deviceInfo})"
 
   if (deviceInfo.percent != null) {
-    log.warn "${device.label} is updating firmware: ${deviceInfo.percent}% complete"
+    log.warn "Firmware update ${deviceInfo.percent}% complete"
   }
 
   if (deviceInfo.transition != null) {
@@ -377,7 +398,7 @@ void runCleanup() {
 }
 
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

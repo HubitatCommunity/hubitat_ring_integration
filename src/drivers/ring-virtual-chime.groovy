@@ -1,3 +1,4 @@
+/* groovylint-disable Indentation */
 /**
  *  Ring Virtual Chime Device Driver
  *
@@ -15,7 +16,6 @@
  */
 
 // @todo Consider using /ringtones
-// @todo Consider being able to set do_not_disturb
 
 import groovy.transform.Field
 
@@ -28,11 +28,15 @@ metadata {
     capability "Polling"
     capability "Tone"
 
+    attribute "connectionStatus", "enum", ["offline", "online"]
     attribute "rssi", "number"
     attribute "wifi", "string"
 
     command "playDing"
     command "playMotion"
+
+    command "clearSnooze"
+    command "snooze", [[name: 'Time', type: 'NUMBER', description: 'Snooze sounds for x minutes. [0..1440]']]
   }
 
   preferences {
@@ -42,31 +46,42 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void installed() { updated() }
+
+void updated() { parentCheck() }
+
+void parentCheck() {
+  if (device.parentAppId == null || device.parentDeviceId != null) {
+    log.error("This device can only be installed using the Unofficial Ring Connect app. Remove this device and create it through the app. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
-def parse(String description) {
+void parse(String description) {
   logDebug "description: ${description}"
 }
 
-def poll() {
-  logDebug "poll()"
-  refresh()
-}
+void poll() { refresh() }
 
-def refresh() {
+// apiRequestDevicesApiSet(device.deviceNetworkId, "devices", action: "settings") returns something for this device, but there's no use for those values yet
+void refresh() {
   logDebug "refresh()"
-  parent.apiRequestDeviceRefresh(device.deviceNetworkId)
-  parent.apiRequestDeviceHealth(device.deviceNetworkId, "chimes")
+  parent.apiRequestClientsApiRefresh(device.deviceNetworkId)
+  parent.apiRequestClientsApiHealth(device.deviceNetworkId, "chimes")
+
+  // @todo This isn't quite working yet
+  // parent.apiRequestDeviceGet(device.deviceNetworkId, "chimes", "linked_doorbots")
 }
 
 void beep() { playMotion() }
@@ -75,7 +90,7 @@ void playMotion() {
   if (isMuted()) {
     logInfo "playMotion: Not playing because device is muted"
   } else {
-    parent.apiRequestDeviceControl(device.deviceNetworkId, "chimes", "play_sound", [kind: "motion"])
+    parent.apiRequestClientsApiSet(device.deviceNetworkId, "chimes", action: 'play_sound', query: [kind: "motion"], method: 'Post')
   }
 }
 
@@ -83,8 +98,22 @@ void playDing() {
   if (isMuted()) {
     logInfo "playDing: Not playing because device is muted"
   } else {
-    parent.apiRequestDeviceControl(device.deviceNetworkId, "chimes", "play_sound", [kind: "ding"])
+    parent.apiRequestClientsApiSet(device.deviceNetworkId, "chimes", action: 'play_sound', query: [kind: "ding"], method: 'Post')
   }
+}
+
+void snooze(minutes) {
+  // Value must be in [1, 1440 (24 * 60)]
+  minutes = Math.min(Math.max(minutes == null ? 60 : minutes.toInteger(), 1), 24 * 60)
+
+  logTrace "Requesting snooze for $minutes min"
+
+  parent.apiRequestClientsApiSet(device.deviceNetworkId, "chimes", action: 'do_not_disturb', method: 'Post', body: [time: minutes])
+}
+
+void clearSnooze() {
+  logTrace "Clearing snooze"
+  parent.apiRequestClientsApiSet(device.deviceNetworkId, "chimes", action: 'do_not_disturb', method: 'Post', body: [:])
 }
 
 void setVolume(volumelevel) {
@@ -96,9 +125,10 @@ void setVolume(volumelevel) {
   if (currentVolume != volumelevel) {
     logTrace "requesting volume change to ${volumelevel}"
 
+    // Chime only accepts volume from 0 to 10
     final Integer sentValue = volumelevel / 10
 
-    parent.apiRequestDeviceSet(device.deviceNetworkId, "chimes", null, ["chime[settings][volume]": sentValue])
+    parent.apiRequestClientsApiSet(device.deviceNetworkId, "chimes", method: 'Put', body: [chime: [settings: [volume: sentValue]]])
   }
   else {
     logInfo "Already at volume."
@@ -156,43 +186,37 @@ void updateVolumeInternal(volume) {
 void playText(text, volumelevel) { log.error "playText not implemented!" }
 void playTextAndRestore(text, volumelevel) { log.error "playTextAndRestore not implemented!" }
 void playTextAndResume(text, volumelevel) { log.error "playTextAndResume not implemented!" }
-def playTrack(trackuri, volumelevel) { log.error "playTrack not implemented!" }
-def playTrackAndRestore(trackuri, volumelevel) { log.error "playTrackAndRestore not implemented!" }
-def playTrackAndResume(trackuri, volumelevel) { log.error "playTrackAndResume not implemented!" }
+void playTrack(trackuri, volumelevel) { log.error "playTrack not implemented!" }
+void playTrackAndRestore(trackuri, volumelevel) { log.error "playTrackAndRestore not implemented!" }
+void playTrackAndResume(trackuri, volumelevel) { log.error "playTrackAndResume not implemented!" }
 
 private boolean isMuted() {
   return device.currentValue("mute") == "muted"
 }
 
-void handleDeviceControl(final String action, final Map msg, final Map query) {
-  if (action == "play_sound") {
-    if (query?.kind) {
-      logInfo "Device ${device.label} played '${query?.kind}'"
-    }
-    else {
-      log.error "handleDeviceControl unsupported play_sound with query ${query}"
-    }
-  }
-  else {
-    log.error "handleDeviceControl unsupported action ${action}"
-  }
-}
+void handleClientsApiSet(final Map msg, final Map arguments) {
+  String action = arguments.action
 
-void handleDeviceSet(final String action, final Map msg, final Map query) {
   if (action == null) {
-    if (query?.containsKey("chime[settings][volume]")) {
-      updateVolumeInternal(query["chime[settings][volume]"])
+    if (arguments.body?.settings?.volume) {
+      updateVolumeInternal(arguments.body?.settings?.volume)
     }
     else {
-      log.error "handleDeviceSet unsupported null action with query ${query}"
+      log.error "handleClientsApiSet unsupported null action with body: ${arguments.body}"
     }
   }
+  else if (action == 'play_sound') {
+      logInfo "Device ${device.label} played '${arguments.query?.kind}'"
+  }
+  else if (action == 'do_not_disturb') {
+      logInfo "Device ${device.label} snooze enabled with ${msg.time_remaining} minutes remaining"
+  }
   else {
-    log.error "handleDeviceSet unsupported action ${action}, msg=${msg}, query=${query}"
+    log.error "handleClientsApiSet unsupported action ${action}, msg=${msg}, arguments=${arguments}"
   }
 }
 
-void handleHealth(final Map msg) {
+void handleClientsApiHealth(final Map msg) {
   if (msg.device_health) {
     if (msg.device_health.wifi_name) {
       checkChanged("wifi", msg.device_health.wifi_name)
@@ -200,7 +224,11 @@ void handleHealth(final Map msg) {
   }
 }
 
-void handleRefresh(final Map msg) {
+void handleClientsApiRefresh(final Map msg) {
+  if (msg.alerts?.connection != null) {
+    checkChanged("connectionStatus", msg.alerts.connection) // devices seem to be considered offline after 20 minutes
+  }
+
   if (msg.settings?.volume != null) {
     updateVolumeInternal(msg.settings.volume)
   }
@@ -217,7 +245,7 @@ void runCleanup() {
 }
 
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

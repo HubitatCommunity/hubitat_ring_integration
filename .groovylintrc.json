@@ -1,0 +1,89 @@
+{
+    "extends": "recommended",
+    "rules": {
+        "AssignmentToStaticFieldFromInstanceMethod": {
+            "enabled": false
+        },
+        "BuilderMethodWithSideEffects": {
+            "enabled": false
+        },
+        "CatchException": {
+            "enabled": false
+        },
+        "CompileStatic": {
+            "enabled": false
+        },
+        "CouldBeSwitchStatement": {
+            "enabled": false
+        },
+        "DuplicateListLiteral": {
+            "enabled": false
+        },
+        "DuplicateMapLiteral": {
+            "enabled": false
+        },
+        "DuplicateNumberLiteral": {
+            "enabled": false
+        },
+        "DuplicateStringLiteral": {
+            "enabled": false
+        },
+        "FactoryMethodName": {
+            "enabled": false
+        },
+        "FileEndsWithoutNewline": {
+            "enabled": false
+        },
+        "Indentation": {
+            "spacesPerIndentLevel": 2
+        },
+        "InsecureRandom": {
+            "enabled": false
+        },
+        "Instanceof": {
+            "enabled": false
+        },
+        "LineLength": {
+            "enabled": false
+        },
+        "MethodCount": {
+            "enabled": false
+        },
+        "MethodParameterTypeRequired": {
+            "enabled": false
+        },
+        "MethodReturnTypeRequired": {
+            "enabled": false
+        },
+        "MethodSize": {
+            "enabled": false
+        },
+        "NestedBlockDepth": {
+            "enabled": false
+        },
+        "NestedForLoop": {
+            "enabled": false
+        },
+        "NoDef": {
+            "enabled": false
+        },
+        "ParameterCount": {
+            "enabled": false
+        },
+        "ParameterReassignment": {
+            "enabled": false
+        },
+        "ReturnsNullInsteadOfEmptyCollection": {
+            "enabled": false
+        },
+        "UnnecessaryGString": {
+            "enabled": false
+        },
+        "UnnecessaryGetter": {
+            "enabled": false
+        },
+        "UnusedMethodParameter": {
+            "enabled": false
+        }
+    }
+}

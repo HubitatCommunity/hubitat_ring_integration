@@ -43,31 +43,41 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void installed() { updated() }
+
+void updated() { parentCheck() }
+
+void parentCheck() {
+  if (device.parentDeviceId == null || device.parentAppId != null) {
+    log.error("This device can only be installed using the Ring API Virtual Device. Remove this device and use createDevices in Ring API Virtual Device. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
-def refresh() {
+void refresh() {
   parent.refresh(device.getDataValue("src"))
 }
 
-def on(duration = 60) {
+void on(duration = 60) {
   parent.apiWebsocketRequestSetCommand("light-mode.set", device.getDataValue("src"), device.getDataValue("zid"), [lightMode: "on", duration: duration])
 }
 
-def off() {
+void off() {
   parent.apiWebsocketRequestSetCommand("light-mode.set", device.getDataValue("src"), device.getDataValue("zid"), [lightMode: "default"])
 }
 
-def setBrightness(brightness) {
+void setBrightness(brightness) {
   if (NO_BRIGHTNESS_DEVICES.contains(device.getDataValue("fingerprint"))) {
     log.error "This device doesn't support brightness!"
     return
@@ -110,7 +120,18 @@ void setValues(final Map deviceInfo) {
   // Update state values
   Map stateValues = deviceInfo.subMap(['impulseType', 'lastUpdate'])
   if (stateValues) {
-      state << stateValues
+    state << stateValues
+
+    if (stateValues.impulseType?.startsWith('firmware-update.')) {
+      String impulseTypeSuffix = stateValues.impulseType.substring(16)
+
+      if (impulseTypeSuffix in ['canceled', 'downloading', 'reverted', 'started', 'succeeded', 'user-aborted', 'verified']) {
+        log.warn('Firmware update ' + impulseTypeSuffix)
+      }
+      else if (impulseTypeSuffix in ['failed', 'unsuccessful']) {
+        log.error('Firmware update ' + impulseTypeSuffix)
+      }
+    }
   }
 }
 
@@ -118,7 +139,7 @@ void setPassthruValues(final Map deviceInfo) {
   logDebug "setPassthruValues(${deviceInfo})"
 
   if (deviceInfo.percent != null) {
-    log.warn "${device.label} is updating firmware: ${deviceInfo.percent}% complete"
+    log.warn "Firmware update ${deviceInfo.percent}% complete"
   }
 }
 
@@ -130,7 +151,7 @@ void runCleanup() {
 }
 
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

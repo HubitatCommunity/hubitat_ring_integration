@@ -14,6 +14,8 @@
  *  for the specific language governing permissions and limitations under the License.
  */
 
+import com.hubitat.app.ChildDeviceWrapper
+
 metadata {
   definition(name: "Ring Virtual Beams Group", namespace: "ring-hubitat-codahq", author: "Ben Rimmasch") {
     capability "Battery"
@@ -32,27 +34,37 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void installed() { updated() }
+
+void updated() { parentCheck() }
+
+void parentCheck() {
+  if (device.parentDeviceId == null || device.parentAppId != null) {
+    log.error("This device can only be installed using the Ring API Virtual Device. Remove this device and use createDevices in Ring API Virtual Device. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
-def refresh() {
+void refresh() {
   parent.refresh(device.getDataValue("src"))
 }
 
-def on(duration = 60) {
+void on(duration = 60) {
   parent.apiWebsocketRequestSetCommand("light-mode.set", device.getDataValue("src"), device.getDataValue("zid"), [lightMode: "on", duration: duration])
 }
 
-def off() {
+void off() {
   parent.apiWebsocketRequestSetCommand("light-mode.set", device.getDataValue("src"), device.getDataValue("zid"), [lightMode: "default"])
 }
 
@@ -62,7 +74,7 @@ void setValues(final Map deviceInfo) {
   if (deviceInfo.groupMembers) {
     Map members = [:]
     for (final String groupMemeber in deviceInfo.groupMembers) {
-      def d = parent.getChildByZID(groupMemeber)
+      ChildDeviceWrapper d = parent.getChildByZID(groupMemeber)
       if (d) {
         members[d.deviceNetworkId] = d.label
       } else {
@@ -80,7 +92,18 @@ void setValues(final Map deviceInfo) {
   // Update state values
   Map stateValues = deviceInfo.subMap(['impulseType', 'lastUpdate'])
   if (stateValues) {
-      state << stateValues
+    state << stateValues
+
+    if (stateValues.impulseType?.startsWith('firmware-update.')) {
+      String impulseTypeSuffix = stateValues.impulseType.substring(16)
+
+      if (impulseTypeSuffix in ['canceled', 'downloading', 'reverted', 'started', 'succeeded', 'user-aborted', 'verified']) {
+        log.warn('Firmware update ' + impulseTypeSuffix)
+      }
+      else if (impulseTypeSuffix in ['failed', 'unsuccessful']) {
+        log.error('Firmware update ' + impulseTypeSuffix)
+      }
+    }
   }
 }
 
@@ -93,7 +116,7 @@ void runCleanup() {
 }
 
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

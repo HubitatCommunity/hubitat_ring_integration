@@ -34,19 +34,29 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void installed() { updated() }
+
+void updated() { parentCheck() }
+
+void parentCheck() {
+  if (device.parentDeviceId == null || device.parentAppId != null) {
+    log.error("This device can only be installed using the Ring API Virtual Device. Remove this device and use createDevices in Ring API Virtual Device. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
-def refresh() {
+void refresh() {
   parent.refresh(device.getDataValue("src"))
 }
 
@@ -65,35 +75,38 @@ void setValues(final Map deviceInfo) {
     final Map networks = deviceInfo.networks
 
     if (deviceInfo.containsKey('networkConnection')) {
-      final networkConnection = deviceInfo.networkConnection
-
-      checkChanged("networkConnection", networks.getOrDefault(networkConnection, [type: "unknown"]).type)
+      checkChanged("networkConnection", networks.getOrDefault(deviceInfo.networkConnection, [type: "unknown"]).type)
     }
 
     // Beams bridge appears to only support wifi
-    for (final String networkKey in ['wlan0']) {
-      final Map network = networks[networkKey]
-      if (network != null) {
-        String networkType = network.type
+    for (final entry in networks.subMap(['wlan0'])) {
+      final Map network = entry.value
+      final String networkKey = entry.key
 
-        // Sometimes the type isn't included. Just skip updating things for now
-        if (!networkType) {
-          logDebug "Could not get network.type for ${networkKey}: ${networks}"
-          continue
-        }
-
-        String networkName = network.ssid ?: device.getDataValue(networkKey + "Ssid")
-        String networkRssi = network.rssi ?: device.getDataValue(networkKey + "Rssi")
-
-        checkChangedDataValue(networkKey + "Type", networkType)
-        checkChangedDataValue(networkKey + "Ssid", networkName)
-        checkChangedDataValue(networkKey + "Rssi", networkRssi)
-
-        final String fullNetworkStr = networkName + " RSSI " + networkRssi
-        logInfo "${networkKey} ${networkType} ${fullNetworkStr}"
-        checkChanged(networkType, fullNetworkStr)
-        state[networkKey] = fullNetworkStr
+      if (network == null) {
+        logDebug "Got a null networks key for ${networkKey}. Ignoring"
+        continue
       }
+
+      String networkType = network.type
+
+      // Sometimes the type isn't included. Just skip updating things for now
+      if (!networkType) {
+        logDebug "Could not get network.type for ${networkKey}: ${networks}. Ignoring"
+        continue
+      }
+
+      String networkName = network.ssid ?: device.getDataValue(networkKey + "Ssid")
+      String networkRssi = network.rssi ?: device.getDataValue(networkKey + "Rssi")
+
+      checkChangedDataValue(networkKey + "Type", networkType)
+      checkChangedDataValue(networkKey + "Ssid", networkName)
+      checkChangedDataValue(networkKey + "Rssi", networkRssi)
+
+      final String fullNetworkStr = networkName + " RSSI " + networkRssi
+      logInfo "${networkKey} ${networkType} ${fullNetworkStr}"
+      checkChanged(networkType, fullNetworkStr)
+      state[networkKey] = fullNetworkStr
     }
   }
 
@@ -105,7 +118,18 @@ void setValues(final Map deviceInfo) {
   // Update state values
   Map stateValues = deviceInfo.subMap(['impulseType', 'lastUpdate'])
   if (stateValues) {
-      state << stateValues
+    state << stateValues
+
+    if (stateValues.impulseType?.startsWith('firmware-update.')) {
+      String impulseTypeSuffix = stateValues.impulseType.substring(16)
+
+      if (impulseTypeSuffix in ['canceled', 'downloading', 'reverted', 'started', 'succeeded', 'user-aborted', 'verified']) {
+        log.warn('Firmware update ' + impulseTypeSuffix)
+      }
+      else if (impulseTypeSuffix in ['failed', 'unsuccessful']) {
+        log.error('Firmware update ' + impulseTypeSuffix)
+      }
+    }
   }
 }
 
@@ -113,7 +137,7 @@ void setPassthruValues(final Map deviceInfo) {
   logDebug "setPassthruValues(${deviceInfo})"
 
   if (deviceInfo.percent != null) {
-    log.warn "${device.label} is updating firmware: ${deviceInfo.percent}% complete"
+    log.warn "Firmware update ${deviceInfo.percent}% complete"
   }
 }
 
@@ -125,7 +149,7 @@ void runCleanup() {
 }
 
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

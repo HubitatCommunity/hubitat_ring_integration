@@ -1,3 +1,4 @@
+/* groovylint-disable Indentation */
 /**
  *  Ring Virtual Camera Device Driver
  *
@@ -24,6 +25,7 @@ metadata {
     capability "Refresh"
     capability "Sensor"
 
+    attribute "connectionStatus", "enum", ["offline", "online"]
     attribute "firmware", "string"
     attribute "rssi", "number"
     attribute "wifi", "string"
@@ -39,42 +41,53 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void installed() {
+  sendEvent(name: "numberOfButtons", value: '1')
+  updated()
+}
+
+void updated() {
+  parentCheck()
+
+  parent.updateEnabledSnappables()
+}
+
+void parentCheck() {
+  if (device.parentAppId == null || device.parentDeviceId != null) {
+    log.error("This device can only be installed using the Unofficial Ring Connect app. Remove this device and create it through the app. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
-def updated() {
-  checkChanged("numberOfButtons", 1)
-  parent.snapshotOption(device.deviceNetworkId, snapshotPolling)
-}
-
-def parse(String description) {
+void parse(String description) {
   logDebug "description: ${description}"
 }
 
-def poll() {
-  refresh()
-}
+void poll() { refresh() }
 
 void push(buttonNumber) {
   log.error "Not implemented! push(buttonNumber)"
 }
 
-def refresh() {
+// apiRequestDevicesApiSet(device.deviceNetworkId, "devices", action: "settings") returns something for this device, but there's no use for those values yet
+void refresh() {
   logDebug "refresh()"
-  parent.apiRequestDeviceRefresh(device.deviceNetworkId)
-  parent.apiRequestDeviceHealth(device.deviceNetworkId, "doorbots")
+  parent.apiRequestClientsApiRefresh(device.deviceNetworkId)
+  parent.apiRequestClientsApiHealth(device.deviceNetworkId, "doorbots")
 }
 
-def getDings() {
+void getDings() {
   logDebug "getDings()"
   parent.apiRequestDings()
 }
@@ -84,7 +97,7 @@ void handleDing(final Map msg) {
   sendEvent(name: "pushed", value: 1, isStateChange: true)
 }
 
-void handleHealth(final Map msg) {
+void handleClientsApiHealth(final Map msg) {
   if (msg.device_health) {
     if (msg.device_health.wifi_name) {
       checkChanged("wifi", msg.device_health.wifi_name)
@@ -107,7 +120,11 @@ void handleMotion(final Map msg) {
   }
 }
 
-void handleRefresh(final Map msg) {
+void handleClientsApiRefresh(final Map msg) {
+  if (msg.alerts?.connection != null) {
+    checkChanged("connectionStatus", msg.alerts.connection) // devices seem to be considered offline after 20 minutes
+  }
+
   if (!["jbox_v1", "lpd_v1", "lpd_v2"].contains(device.getDataValue("kind"))) {
     if (msg.battery_life != null) {
       checkChanged("battery", msg.battery_life, '%')
@@ -127,6 +144,12 @@ void handleRefresh(final Map msg) {
     if (health.rssi) {
       checkChanged("rssi", health.rssi)
     }
+
+    // Per Ring: is_sidewalk_gateway indicates only whether a device *can* be used as a Sidewalk gateway. sidewalk_connection
+    // indicates whether Sidewalk is enabled in the Ring account. Both must be true for Sidewalk to be enabled on a device
+    if (msg.is_sidewalk_gateway && health.sidewalk_connection) {
+      log.warn("Your device is being used as an Amazon sidewalk device.")
+    }
   }
 }
 
@@ -140,7 +163,7 @@ void runCleanup() {
 }
 
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

@@ -1,3 +1,4 @@
+/* groovylint-disable Indentation */
 /**
  *  Ring Virtual Camera with Siren Device Driver
  *
@@ -25,6 +26,7 @@ metadata {
     capability "Refresh"
     capability "Sensor"
 
+    attribute "connectionStatus", "enum", ["offline", "online"]
     attribute "firmware", "string"
     attribute "rssi", "number"
     attribute "wifi", "string"
@@ -40,62 +42,73 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void installed() { updated() }
+
+void updated() {
+  parentCheck()
+
+  parent.updateEnabledSnappables()
+}
+
+void parentCheck() {
+  if (device.parentAppId == null || device.parentDeviceId != null) {
+    log.error("This device can only be installed using the Unofficial Ring Connect app. Remove this device and create it through the app. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
+  }
+}
+
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
-def parse(String description) {
+void parse(String description) {
   logDebug "description: ${description}"
 }
 
-def poll() {
-  refresh()
-}
+void poll() { refresh() }
 
-def refresh() {
+// apiRequestDevicesApiSet(device.deviceNetworkId, "devices", action: "settings") returns something for this device, but there's no use for those values yet
+void refresh() {
   logDebug "refresh()"
-  parent.apiRequestDeviceRefresh(device.deviceNetworkId)
-  parent.apiRequestDeviceHealth(device.deviceNetworkId, "doorbots")
+  parent.apiRequestClientsApiRefresh(device.deviceNetworkId)
+  parent.apiRequestClientsApiHealth(device.deviceNetworkId, "doorbots")
 }
 
-def getDings() {
+void getDings() {
   logDebug "getDings()"
   parent.apiRequestDings()
 }
 
-def updated() {
-  parent.snapshotOption(device.deviceNetworkId, snapshotPolling)
+void off() {
+  setSirenInternal('off')
 }
 
-def off() {
-  parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "siren_off")
+void siren() {
+  setSirenInternal('on')
 }
 
-def siren() {
-  parent.apiRequestDeviceSet(device.deviceNetworkId, "doorbots", "siren_on")
-}
-
-def strobe(value = "strobe") {
+void strobe(value = "strobe") {
   log.error "Strobe not implemented for device type ${device.getDataValue("kind")}"
 }
 
-def both() {
+void both() {
   log.error "Both (strobe and siren) not implemented for device type ${device.getDataValue("kind")}"
 }
 
-def push(Integer button) {
+void push(Integer button) {
   log.error "Push not implemented for device type ${device.getDataValue("kind")}"
 }
 
-void handleDeviceSet(final String action, final Map msg, final Map query) {
+void handleClientsApiSet(final Map msg, final Map arguments) {
+  String action = arguments.action
+
   if (action == "siren_on") {
     if (device.currentValue("alarm") != "both") {
       checkChanged("alarm", "siren")
@@ -107,11 +120,11 @@ void handleDeviceSet(final String action, final Map msg, final Map query) {
     checkChanged('alarm', "off")
   }
   else {
-    log.error "handleDeviceSet unsupported action ${action}, msg=${msg}, query=${query}"
+    log.error "handleClientsApiSet unsupported action ${action}, msg=${msg}, arguments=${arguments}"
   }
 }
 
-void handleHealth(final Map msg) {
+void handleClientsApiHealth(final Map msg) {
   if (msg.device_health) {
     if (msg.device_health.wifi_name) {
       checkChanged("wifi", msg.device_health.wifi_name)
@@ -134,7 +147,11 @@ void handleMotion(final Map msg) {
   }
 }
 
-void handleRefresh(final Map msg) {
+void handleClientsApiRefresh(final Map msg) {
+  if (msg.alerts?.connection != null) {
+    checkChanged("connectionStatus", msg.alerts.connection) // devices seem to be considered offline after 20 minutes
+  }
+
   if (msg.battery_life != null) {
     checkChanged("battery", msg.battery_life, '%')
   }
@@ -158,6 +175,12 @@ void handleRefresh(final Map msg) {
     if (health.rssi) {
       checkChanged("rssi", health.rssi)
     }
+
+    // Per Ring: is_sidewalk_gateway indicates only whether a device *can* be used as a Sidewalk gateway. sidewalk_connection
+    // indicates whether Sidewalk is enabled in the Ring account. Both must be true for Sidewalk to be enabled on a device
+    if (msg.is_sidewalk_gateway && health.sidewalk_connection) {
+      log.warn("Your device is being used as an Amazon sidewalk device.")
+    }
   }
 }
 
@@ -170,8 +193,12 @@ void runCleanup() {
   device.removeDataValue("device_id")
 }
 
+void setSirenInternal(String state) {
+    parent.apiRequestClientsApiSet(device.deviceNetworkId, "doorbots", action: "siren_" + state, method: 'Put')
+}
+
 boolean checkChanged(final String attribute, final newStatus, final String unit=null, final String type=null) {
-  final boolean changed = device.currentValue(attribute) != newStatus
+  final boolean changed = isStateChange(device, attribute, newStatus.toString())
   if (changed) {
     logInfo "${attribute.capitalize()} for device ${device.label} is ${newStatus}"
   }

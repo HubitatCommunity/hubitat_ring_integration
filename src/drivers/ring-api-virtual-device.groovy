@@ -1,3 +1,4 @@
+/* groovylint-disable Indentation */
 /**
  *  Ring API Virtual Device Driver
  *
@@ -59,19 +60,19 @@ metadata {
   }
 }
 
-void logInfo(msg) {
+void logInfo(Object msg) {
   if (descriptionTextEnable) { log.info msg }
 }
 
-void logDebug(msg) {
+void logDebug(Object msg) {
   if (logEnable) { log.debug msg }
 }
 
-void logTrace(msg) {
+void logTrace(Object msg) {
   if (traceLogEnable) { log.trace msg }
 }
 
-def setMode(mode) {
+void setMode(mode) {
   logDebug "setMode(${mode})"
   if (state.alarmCapable) {
     log.error "setMode supported from API device. Ring account has alarm present so use alarm modes!"
@@ -91,23 +92,21 @@ void setDebugImpulseErrorSetInfoExcludeList(excludeList) {
   state.debugImpulseErrorSetInfoExcludeList = excludeList?.replaceAll("\\s", "")?.split(",") as Set
 }
 
-def installed() {
-  initialize()
-}
+void installed() { initialize() }
 
-def updated() {
-  initialize()
-}
+void updated() { initialize() }
 
-def initialize() {
+void initialize() {
   logDebug "initialize()"
+
+  parentCheck()
 
   unschedule(silentWebsocketReconnect)
 
   // Setup watchdog
   unschedule(watchDogChecking) // For compatibility with old installs
   unschedule(websocketWatchdog)
-  if ((getChildDevices()?.size() ?: 0) != 0) {
+  if (getChildDevices()) {
     runEvery5Minutes(websocketWatchdog)
   }
 
@@ -115,7 +114,13 @@ def initialize() {
   if (state.hubs) {
     updateTokensAndReconnectWebSocket()
   } else {
-    log.warn "Nothing to initialize..."
+    log.warn "No hubs enabled. Nothing to initialize. Use the Unofficial Ring Connect app to enable hubs"
+  }
+}
+
+void parentCheck() {
+  if (device.parentAppId == null || device.parentDeviceId != null) {
+    log.error("This device can only be installed using the Unofficial Ring Connect app. Remove this device and create it through the app. parentAppId=${device.parentAppId}, parentDeviceId=${device.parentDeviceId}")
   }
 }
 
@@ -190,15 +195,15 @@ void updateTickets(final Map ticket) {
   if (state.createableHubs != null) {
     log.warn("Migrating old createableHubs list to new")
 
-    state.enabledHubDoorbotIds = (ticket.assets.findAll { state.createableHubs.contains(it.kind) }*.doorbotId).toSet()
+    state.enabledHubDoorbotIds = (ticket.assets.findAll { Map asset -> state.createableHubs.contains(asset.kind) }*.doorbotId).toSet()
 
     state.remove('createableHubs')
   }
 
-  final List enabledHubs = ticket.assets.findAll { state.enabledHubDoorbotIds.contains(it.doorbotId) }
+  final List enabledHubs = ticket.assets.findAll { Map asset -> state.enabledHubDoorbotIds.contains(asset.doorbotId) }
 
-  state.hubs = enabledHubs.collectEntries { [(it.uuid): it.doorbotId] }
-  state.alarmCapable = enabledHubs.find { ALARM_CAPABLE_KINDS.contains(it.kind) } != null
+  state.hubs = enabledHubs.collectEntries { Map asset -> [(asset.uuid): asset.doorbotId] }
+  state.alarmCapable = enabledHubs.find { Map asset -> ALARM_CAPABLE_KINDS.contains(asset.kind) } != null
 
   final String wsUrl = "wss://${ticket.host}/ws?authcode=${ticket.ticket}&ack=false"
   logTrace "wsUrl: $wsUrl"
@@ -382,8 +387,8 @@ void webSocketStatus(final String status) {
     // Refresh after a second delay. This gives the 'websocket' attribute time to be update
     runIn(1, refreshInternalDelay, [data: [zid: null, quiet: true]])
 
-    // Schedule silent connect for ~4 hours from now. Should happen just before Ring automatically disconnects us
-    runIn(60 * 60 * 4 - new Random().nextInt(60), silentWebsocketReconnect)
+    // Schedule silent reconnect for just under 4 hours from now. Should happen just before Ring automatically disconnects us
+    runIn(60 * 60 * 4 - 60 - new Random().nextInt(60), silentWebsocketReconnect)
 
     state.reconnectDelay = 1
   }
@@ -450,6 +455,9 @@ void updateWebsocketAttributeClosedDelay() {
 }
 
 void reconnectWebSocket() {
+  unschedule(silentWebsocketReconnect)
+  unschedule(silentWebsocketReconnectCloseSocket)
+
   // First delay is 2 seconds, doubles every time
   state.reconnectDelay = (state.reconnectDelay ?: 1) * 2
   // Don't let delay get too crazy, max it out at 30 minutes
@@ -462,12 +470,10 @@ void reconnectWebSocket() {
 }
 
 void uninstalled() {
-  getChildDevices().each {
-    deleteChildDevice(it.deviceNetworkId)
-  }
+  childDevices.each { ChildDeviceWrapper dev -> deleteChildDevice(dev.deviceNetworkId) }
 }
 
-def parse(String description) {
+void parse(String description) {
   final Long parseStart = now()
 
   //logTrace "parse description: ${description}"
@@ -612,6 +618,9 @@ def parse(String description) {
       }
       else if (datatype == null && jsonMsg.context?.uiConnection != null) {
         logDebug "Ignoring a message.DeviceInfoDocGetList with no datatype that has the context.uiConnection key"
+      }
+      else if (datatype == null && !jsonMsg.containsKey('body') && jsonMsg.status == -66) {
+        logDebug "Ignoring a message.DeviceInfoDocGetList with no datatype and no body with a status of -66"
       }
       else {
         unsupportedDatatypeReceived = true
@@ -910,7 +919,7 @@ Map<String, Map> parseDeviceInfoDocType(final Map json, final String assetId, fi
         curDeviceInfo.batteryStatus = tmpGeneral.batteryStatus
       }
 
-      final tamperStatus = tmpGeneral.tamperStatus
+      final String tamperStatus = tmpGeneral.tamperStatus
       if (tamperStatus != null) {
         curDeviceInfo.tamper = tamperStatus == "tamper" ? "detected" : "clear"
       }
@@ -920,7 +929,7 @@ Map<String, Map> parseDeviceInfoDocType(final Map json, final String assetId, fi
        */
 
       // adapter.v1 only contains changed values when msgtype == "DataUpdate". When msgtype == "DeviceInfoDocGetList" it contains all values
-      // context.v1.adapter.v1 When present, seems to contain all values
+      // context.v1.adapter.v1. When present, seems to contain all values
       final Map tmpAdapter = deviceJson.adapter?.v1
 
       if (tmpAdapter) {
@@ -961,7 +970,7 @@ Map<String, Map> parseDeviceInfoDocType(final Map json, final String assetId, fi
      * Begin parse deviceJson device.v1
      */
 
-    // device.v1 only contains changed values when msgtype == "DataUpdate". When msgtype == "DeviceInfoDocGetList" it contains all values
+    // device.v1 only contains changed values when msgtype == "DataUpdate". When msgtype == "DeviceInfoDocGetList" it contains all values.
     // When present, context.v1.device.v1 seems to contain all values
     // @note Some keys, like alarminfo and transitionDelayEndTimestamp, are set to null on disable, but in subsequent
     //       message are omitted entirely. This could mean that there are some scenarios where
@@ -1027,7 +1036,7 @@ Map<String, Map> parseDeviceInfoDocType(final Map json, final String assetId, fi
         }
       }
 
-      final version = deviceV1.version
+      final Object version = deviceV1.version
       if (version != null) {
         if (version instanceof Map) {
           if (deviceType == 'adapter.ringnet') {
@@ -1045,12 +1054,12 @@ Map<String, Map> parseDeviceInfoDocType(final Map json, final String assetId, fi
         }
       }
 
-      final motionStatus = deviceV1.motionStatus
+      final String motionStatus = deviceV1.motionStatus
       if (motionStatus != null) {
         curDeviceInfo.motion = motionStatus == "clear" ? "inactive" : "active"
       }
 
-      final on = deviceV1.on
+      final Boolean on = deviceV1.on
       if (on != null) {
         curDeviceInfo.switch = on ? "on" : "off"
       }
@@ -1081,8 +1090,8 @@ void createChild(final String hubZid, final Map deviceInfo) {
     final String formattedDNI = getFormattedDNI(deviceInfo.zid)
 
     try {
-      def d = addChildDevice("ring-hubitat-codahq", mappedDeviceTypeName, formattedDNI,
-                             [label: deviceInfo.name ?: mappedDeviceTypeName])
+      ChildDeviceWrapper d = addChildDevice("ring-hubitat-codahq", mappedDeviceTypeName, formattedDNI,
+                                            [label: deviceInfo.name ?: mappedDeviceTypeName])
       setInitialDeviceDataValues(d, deviceInfo.deviceType, hubZid, deviceInfo)
 
       log.info "Created a ${mappedDeviceTypeName} (${deviceType}) with dni: ${formattedDNI}"
@@ -1097,7 +1106,7 @@ void createChild(final String hubZid, final Map deviceInfo) {
   }
 }
 
-void setInitialDeviceDataValues(d, final String type, final String hubZid, final Map deviceInfo) {
+void setInitialDeviceDataValues(ChildDeviceWrapper d, final String type, final String hubZid, final Map deviceInfo) {
   d.updateDataValue("zid",  deviceInfo.zid)
   d.updateDataValue("fingerprint", deviceInfo.fingerprint ?: "N/A")
   d.updateDataValue("hardwareVersion", deviceInfo.hardwareVersion?.toString() ?: "N/A")
@@ -1130,14 +1139,12 @@ void sendUpdate(final String assetKind, final String hubZid, final Map deviceInf
         setInitialDeviceDataValues(d, assetKind, hubZid, deviceInfo)
       }
     }
-  } else {
-    if (!suppressMissingDeviceMessages) {
-      if (DEVICE_TYPE_NAMES.containsKey(deviceType)) {
-        logMissingDeviceMsg("sendUpdate", deviceInfo.zid, deviceInfo.name)
-      } else {
-        log.warn "Device ${deviceInfo.name} of type ${deviceType} with zid ${deviceInfo.zid} is not currently supported"
-        log.warn(JsonOutput.toJson(deviceInfo))
-      }
+  } else if (!suppressMissingDeviceMessages) {
+    if (DEVICE_TYPE_NAMES.containsKey(deviceType)) {
+      logMissingDeviceMsg("sendUpdate", deviceInfo.zid, deviceInfo.name)
+    } else {
+      log.warn "Device ${deviceInfo.name} of type ${deviceType} with zid ${deviceInfo.zid} is not currently supported"
+      log.warn(JsonOutput.toJson(deviceInfo))
     }
   }
 }
