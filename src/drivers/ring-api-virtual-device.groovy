@@ -1222,6 +1222,7 @@ ChildDeviceWrapper getChildByZID(final String zid) {
 @Field final static Set HUB_COMPOSITE_DEVICES = [
   "access-code.vault",
   "access-code",
+  "adapter.shadow",
   "adapter.ringnet",
   "adapter.zigbee",
   "adapter.zwave",
@@ -1233,6 +1234,7 @@ ChildDeviceWrapper getChildByZID(final String zid) {
 @Field final static Set IMPULSE_ONLY_DEVICE_TYPES = [
   "access-code",
   "access-code.vault",
+  "adapter.shadow",
   "adapter.zigbee",
   "adapter.zwave",
 ].toSet().asImmutable()
