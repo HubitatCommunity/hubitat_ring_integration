@@ -23,17 +23,24 @@ metadata {
     capability "Sensor"
     capability "Switch"
     capability "Refresh"
+    capability "Health Check"
 
     attribute "firmware", "string"
     attribute "battery2", "number"
     attribute "rssi", "number"
     attribute "wifi", "string"
+    attribute "healthStatus", "enum", [ "unknown", "offline", "online" ]
 
     command "flash"
     command "getDings"
+    command "snoozeMotionAlerts", [
+        [name:"minutes", type:"NUMBER", description:"Number of minutes to snooze motion alerts for", constraints:["NUMBER"]] ]
+    command "motionActivatedLights", [
+		[name:"state", description:"Enable or disable lights on motion", type: "ENUM", constraints: ["enabled","disabled"]] ]
   }
 
   preferences {
+    input name: "deviceStatusPollingEnable", type: "bool", title: "Enable polling for device status", defaultValue: true
     input name: "lightPolling", type: "bool", title: "Enable polling for light status on this device", defaultValue: false
     input name: "lightInterval", type: "number", range: 10..600, title: "Number of seconds in between light polls", defaultValue: 15
     input name: "snapshotPolling", type: "bool", title: "Enable polling for thumbnail snapshots on this device", defaultValue: false
@@ -94,9 +101,34 @@ def pollLight() {
   }
 }
 
+def snoozeMotionAlerts(minutes = 60) {
+    parent.apiRequestDeviceControl(device.deviceNetworkId, "doorbots", "motion_snooze?time=${minutes}", null)
+}
+
+def motionActivatedLights(state) {
+    // This is backwards as it's manipulating "always snooze"
+    stateOfLight = state == "enabled" ? false : true
+    parent.apiRequestDeviceApiSet(device.deviceNetworkId, "devices", "settings", ["enable":stateOfLight,"light_snooze_settings":["always_on":stateOfLight]])
+}
+
 def updated() {
   setupPolling()
   parent.snapshotOption(device.deviceNetworkId, snapshotPolling)
+  scheduleDevicePolling()
+}
+
+def installed() {
+  scheduleDevicePolling()
+}
+
+def scheduleDevicePolling() {
+  unschedule(pollDeviceStatus)
+  // Schedule at a random second starting at the next minute
+  def nextMinute = ((new Date().format( "m" ) as int) + 1) % 60
+  Random rnd = new Random()
+  if (deviceStatusPollingEnable) {
+      schedule( "${rnd.nextInt(59)} ${nextMinute}/30 * ? * *", "refresh" )
+  }
 }
 
 def on() {
@@ -168,7 +200,14 @@ void handleMotion(final Map msg) {
   }
 }
 
-void handleRefresh(final Map msg) {
+void handleRefresh(final Map msg) {  
+  if (msg?.alerts?.connection != null) {
+    checkChanged("healthStatus", msg.alerts.connection) // devices seem to be considered offline after 20 minutes
+  }
+  else {
+    checkChanged("healthStatus", "unknown")
+  }
+    
   if (!discardBatteryLevel) {
     if (msg.battery_life != null) {
       checkChanged("battery", msg.battery_life, "%")
