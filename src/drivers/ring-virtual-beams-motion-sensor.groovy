@@ -22,6 +22,7 @@ metadata {
     capability "Motion Sensor"
     capability "Refresh"
     capability "Sensor"
+    capability "TamperAlert"
 
     attribute "commStatus", "enum", ["error", "ok", "update-queued", "updating", "waiting-for-join", "wrong-network"]
     attribute "firmware", "string"
@@ -88,7 +89,7 @@ void setValues(final Map deviceInfo) {
   }
 
   // Update attributes where deviceInfo key is the same as attribute name and no conversion is necessary
-  for (final entry in deviceInfo.subMap(["commStatus", "firmware", "motion", "rfChannel", "rssi"])) {
+  for (final entry in deviceInfo.subMap(["commStatus", "firmware", "motion", "rfChannel", "rssi", "tamper"])) {
     checkChanged(entry.key, entry.value)
   }
 
