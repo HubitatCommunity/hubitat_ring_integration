@@ -2,7 +2,7 @@
   "packageName": "Hubitat Ring Integration (Unofficial)",
   "author": "codahq",
   "version": "0.5.9",
-  "betaVersion": "0.6.0.3",
+  "betaVersion": "0.6.0.4",
   "minimumHEVersion": "0.0",
   "dateReleased": "2024-06-18",
   "releaseNotes": "Fix apiRequestTickets 500 error.\nAdd support for stickup_cam_longfin, stickup_cam_medusa, and stickup_cam_mini_v2",
