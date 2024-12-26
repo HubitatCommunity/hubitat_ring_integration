@@ -1615,6 +1615,23 @@ void apiRequestAsyncCallbackCommon(resp, Map data) {
       msg += "SSL error: " + message
     } else if (isDnsHttpError(status, message)) {
       msg += "DNS error: " + message
+
+    // Cloudflare has a bunch of nonstandard http errors. Not much we can do with them, so just print a message
+    // Some of these force the browser to refresh continuously, which is annoying when viewing hubitat logs
+    } else if (status == 520) {
+        msg += "Cloudflare error 520. Web server returned an unknown error"
+    } else if (status == 521) {
+        msg += "Cloudflare error 521. Web server is down"
+    } else if (status == 522) {
+        msg += "Cloudflare error 522. Connection timed out"
+    } else if (status == 523) {
+        msg += "Cloudflare error 523. Origin is unreachable"
+    } else if (status == 524) {
+        msg += "Cloudflare error 524. A timeout occurred"
+    } else if (status == 525) {
+        msg += "Cloudflare error 525. SSL handshake failed"
+    } else if (status == 526) {
+        msg += "Cloudflare error 526. Invalid SSL certificate"
     } else {
       msg += "error: " + status + ", " + message + ", " + resp.errorData
     }
