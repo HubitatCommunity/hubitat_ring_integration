@@ -133,7 +133,8 @@ void handleClientsApiHealth(final Map msg) {
 }
 
 void handleMotion(final Map msg) {
-  if (msg.motion == true) {
+  // Some devices set state="ringing" even when motion=false
+  if (msg.motion == true || msg.state == "ringing") {
     checkChanged("motion", "active")
 
     runIn(60, motionOff) // We don't get motion off msgs from ifttt, and other motion only happens on a manual refresh
